@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Analytics</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Platform Analytics</h1>
+            <div class="header-actions">
+                <a href="/admin/dashboard" class="btn">← Back to Dashboard</a>
+            </div>
+        </div>
+        
+        <div class="card" style="text-align: center; padding: 50px;">
+            <h2 style="margin-bottom: 32px;">Student Allocation Success Rate</h2>
+            <div style="font-size: 72px; font-weight: 800; margin: 32px 0; background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+                {{ success_rate }}%
+            </div>
+            <p style="font-size: 18px; color: var(--light-text); margin-bottom: 48px;">Students successfully allocated out of total registered</p>
+            
+            <img src="data:image/png;base64,{{ pie_chart }}" alt="Allocation Chart" style="max-width: 600px; width: 100%; border-radius: 20px; box-shadow: var(--shadow-lg); margin-top: 24px;">
+        </div>
+    </div>
+</body>
+</html>

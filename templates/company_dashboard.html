@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Company Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏢 Company Dashboard</h1>
+            <div class="header-actions">
+                <a href="/logout" class="logout-btn">Logout</a>
+            </div>
+        </div>
+        
+        <!-- Company Profile Summary -->
+        {% if profile and profile[1] %}
+        <div class="card">
+            <h2>🏢 Company Profile</h2>
+            <div class="profile-card">
+                {% if profile[5] %}
+                <img src="/uploads/{{ profile[5] }}" alt="Company Logo" style="width: 120px; height: 120px; border-radius: 16px; object-fit: contain; border: 2px solid var(--border-color); box-shadow: var(--shadow-md);">
+                {% else %}
+                <div style="width: 120px; height: 120px; border-radius: 16px; background: var(--primary-gradient); display: flex; align-items: center; justify-content: center; font-size: 48px; color: white; box-shadow: var(--shadow-md);">
+                    🏢
+                </div>
+                {% endif %}
+                
+                <div class="profile-info">
+                    <h3>{{ profile[1] }}</h3>
+                    <p><strong>📍 Location:</strong> {{ profile[2] or 'Not specified' }}</p>
+                    <p><strong>📧 Contact Email:</strong> {{ profile[3] or 'Not specified' }}</p>
+                    <p><strong>📞 Contact Number:</strong> {{ profile[4] or 'Not specified' }}</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Update Company Profile -->
+        <div class="card">
+            <h2>📝 Company Profile</h2>
+            <form method="POST" enctype="multipart/form-data">
+                <details open>
+                    <summary>
+                        <span>Company Details</span>
+                        <span style="font-size: 12px; font-weight: normal; color: #64748b;">Click to expand ▼</span>
+                    </summary>
+                    
+                    <div class="form-group">
+                        <label for="company_name">Company Name</label>
+                        <input type="text" id="company_name" name="company_name" 
+                               placeholder="Tech Solutions Inc."
+                               value="{{ profile[1] if profile else '' }}" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="location">Location</label>
+                        <input type="text" id="location" name="location" 
+                               placeholder="Mumbai, Maharashtra"
+                               value="{{ profile[2] if profile else '' }}" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="contact_email">Contact Email</label>
+                        <input type="email" id="contact_email" name="contact_email" 
+                               placeholder="hr@company.com"
+                               value="{{ profile[3] if profile else '' }}" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="contact_no">Contact Number</label>
+                        <input type="text" id="contact_no" name="contact_no" 
+                               placeholder="+91-1234567890"
+                               value="{{ profile[4] if profile else '' }}" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="profile_logo">Upload Company Logo</label>
+                        <input type="file" id="profile_logo" name="profile_logo" accept="image/*">
+                        {% if profile[5] %}
+                            <img src="/uploads/{{ profile[5] }}" alt="Company Logo" style="width: 100px; height: 100px; margin-top: 12px; border-radius: 12px; object-fit: contain; border: 2px solid var(--border-color); box-shadow: var(--shadow-sm);">
+                        {% endif %}
+                    </div>
+                </details>
+                
+                <button type="submit">💾 Update Profile</button>
+            </form>
+        </div>
+        
+        <!-- Add New Position -->
+        <div class="card">
+            <h2>📋 Add New Position</h2>
+            <form method="POST">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div class="form-group">
+                        <label for="domain">Domain</label>
+                        <select id="domain" name="domain" required>
+                            <option value="">-- Select Domain --</option>
+                            <option value="AI">Artificial Intelligence</option>
+                            <option value="Data Science">Data Science</option>
+                            <option value="Cyber Security">Cyber Security</option>
+                            <option value="Web Development">Web Development</option>
+                            <option value="Mobile Development">Mobile Development</option>
+                            <option value="Cloud Computing">Cloud Computing</option>
+                            <option value="DevOps">DevOps</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="min_cgpa">Minimum CGPA Required</label>
+                        <input type="number" id="min_cgpa" name="min_cgpa" step="0.01" min="0" max="10"
+                               placeholder="7.0" required>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="required_skills">Required Skills (comma-separated)</label>
+                    <input type="text" id="required_skills" name="required_skills" 
+                           placeholder="Python, JavaScript, React, MySQL, Machine Learning" required>
+                    <small style="color: #64748b; display: block; margin-top: 6px;">💡 Tip: List the key skills required for this position</small>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div class="form-group">
+                        <label for="positions">Number of Positions Available</label>
+                        <input type="number" id="positions" name="positions" min="1" max="100"
+                               placeholder="5" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="stipend">Stipend (₹ per month)</label>
+                        <input type="number" id="stipend" name="stipend" min="0"
+                               placeholder="15000" required>
+                    </div>
+                </div>
+                
+                <button type="submit" name="add_position" value="1">➕ Add Position</button>
+            </form>
+        </div>
+        
+        <!-- Your Job Positions -->
+        <div class="card">
+            <h2>📊 Your Job Positions</h2>
+            {% if positions %}
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Domain</th>
+                                <th>Required Skills</th>
+                                <th>Min CGPA</th>
+                                <th>Openings</th>
+                                <th>Stipend</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for pos in positions %}
+                            <tr>
+                                <td><strong style="color: #667eea;">{{ pos[2] }}</strong></td>
+                                <td>{{ pos[3] }}</td>
+                                <td><span class="status-badge status-success">{{ pos[4] }}+</span></td>
+                                <td><span class="status-badge status-warning">{{ pos[5] }} positions</span></td>
+                                <td><strong style="color: var(--success-color);">₹{{ pos[6] }}/mo</strong></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <p>🔭</p>
+                    <p>No positions added yet.</p>
+                    <p style="font-size: 15px; margin-top: 12px;">Add positions above to start receiving applications.</p>
+                </div>
+            {% endif %}
+        </div>
+        
+        <!-- Allocated Students -->
+        <div class="card">
+            <h2>👥 Allocated Students</h2>
+            {% if allocated_students %}
+                <div style="overflow-x: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Student</th>
+                                <th>Skills</th>
+                                <th>CGPA</th>
+                                <th>Domain</th>
+                                <th>Experience</th>
+                                <th>Match Score</th>
+                                <th>Position</th>
+                                <th>Resume</th>
+                                <th>Photo</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for student in allocated_students %}
+                            <tr>
+                                <td><span class="rank-badge">#{{ student[5] }}</span></td>
+                                <td><strong>{{ student[0] }}</strong></td>
+                                <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">{{ student[1] }}</td>
+                                <td><strong style="color: var(--success-color);">{{ student[2] }}</strong></td>
+                                <td>{{ student[3] }}</td>
+                                <td>{{ student[7] }} yrs</td>
+                                <td><strong style="color: #667eea;">{{ student[4] }}/100</strong></td>
+                                <td><span class="status-badge status-success">{{ student[9] }}</span></td>
+                                <td>
+                                    {% if student[6] %}
+                                    <a href="/uploads/{{ student[6] }}" target="_blank" style="color: #667eea; text-decoration: none; font-weight: 600;">📄 View</a>
+                                    {% else %}
+                                    <span style="color: #999;">N/A</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if student[8] %}
+                                    <img src="/uploads/{{ student[8] }}" alt="Photo" style="width: 50px; height: 50px; border-radius: 50%; object-fit: cover; box-shadow: var(--shadow-sm);">
+                                    {% else %}
+                                    <div style="width: 50px; height: 50px; border-radius: 50%; background: var(--primary-gradient); display: flex; align-items: center; justify-content: center; color: white; font-size: 20px;">👤</div>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div style="margin-top: 24px; padding: 20px; background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%); border-radius: 16px; border-left: 5px solid var(--success-color);">
+                    <p style="font-weight: 600; color: var(--success-color); margin: 0;">
+                        🎉 {{ allocated_students|length }} student(s) have been allocated to your company!
+                    </p>
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <p>🔭</p>
+                    <p>No students allocated yet.</p>
+                    <p style="font-size: 15px; margin-top: 12px;">Wait for the admin to run the allocation process.</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
