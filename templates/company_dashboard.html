@@ -16,12 +16,12 @@
         </div>
         
         <!-- Company Profile Summary -->
-        {% if profile and profile[1] %}
+        {% if profile and profile[0] %}
         <div class="card">
             <h2>🏢 Company Profile</h2>
             <div class="profile-card">
-                {% if profile[5] %}
-                <img src="/uploads/{{ profile[5] }}" alt="Company Logo" style="width: 120px; height: 120px; border-radius: 16px; object-fit: contain; border: 2px solid var(--border-color); box-shadow: var(--shadow-md);">
+                {% if profile[4] %}
+                <img src="/uploads/{{ profile[4] }}" alt="Company Logo" style="width: 120px; height: 120px; border-radius: 16px; object-fit: contain; border: 2px solid var(--border-color); box-shadow: var(--shadow-md);">
                 {% else %}
                 <div style="width: 120px; height: 120px; border-radius: 16px; background: var(--primary-gradient); display: flex; align-items: center; justify-content: center; font-size: 48px; color: white; box-shadow: var(--shadow-md);">
                     🏢
@@ -29,10 +29,10 @@
                 {% endif %}
                 
                 <div class="profile-info">
-                    <h3>{{ profile[1] }}</h3>
-                    <p><strong>📍 Location:</strong> {{ profile[2] or 'Not specified' }}</p>
-                    <p><strong>📧 Contact Email:</strong> {{ profile[3] or 'Not specified' }}</p>
-                    <p><strong>📞 Contact Number:</strong> {{ profile[4] or 'Not specified' }}</p>
+                    <h3>{{ profile[0] }}</h3>
+                    <p><strong>📍 Location:</strong> {{ profile[1] or 'Not specified' }}</p>
+                    <p><strong>📧 Contact Email:</strong> {{ profile[2] or 'Not specified' }}</p>
+                    <p><strong>📞 Contact Number:</strong> {{ profile[3] or 'Not specified' }}</p>
                 </div>
             </div>
         </div>
@@ -52,35 +52,35 @@
                         <label for="company_name">Company Name</label>
                         <input type="text" id="company_name" name="company_name" 
                                placeholder="Tech Solutions Inc."
-                               value="{{ profile[1] if profile else '' }}" required>
+                               value="{{ profile[0] if profile else '' }}" required>
                     </div>
                     
                     <div class="form-group">
                         <label for="location">Location</label>
                         <input type="text" id="location" name="location" 
                                placeholder="Mumbai, Maharashtra"
-                               value="{{ profile[2] if profile else '' }}" required>
+                               value="{{ profile[1] if profile else '' }}" required>
                     </div>
                     
                     <div class="form-group">
                         <label for="contact_email">Contact Email</label>
                         <input type="email" id="contact_email" name="contact_email" 
                                placeholder="hr@company.com"
-                               value="{{ profile[3] if profile else '' }}" required>
+                               value="{{ profile[2] if profile else '' }}" required>
                     </div>
                     
                     <div class="form-group">
                         <label for="contact_no">Contact Number</label>
                         <input type="text" id="contact_no" name="contact_no" 
                                placeholder="+91-1234567890"
-                               value="{{ profile[4] if profile else '' }}" required>
+                               value="{{ profile[3] if profile else '' }}" required>
                     </div>
                     
                     <div class="form-group">
                         <label for="profile_logo">Upload Company Logo</label>
                         <input type="file" id="profile_logo" name="profile_logo" accept="image/*">
-                        {% if profile[5] %}
-                            <img src="/uploads/{{ profile[5] }}" alt="Company Logo" style="width: 100px; height: 100px; margin-top: 12px; border-radius: 12px; object-fit: contain; border: 2px solid var(--border-color); box-shadow: var(--shadow-sm);">
+                        {% if profile[4] %}
+                            <img src="/uploads/{{ profile[4] }}" alt="Company Logo" style="width: 100px; height: 100px; margin-top: 12px; border-radius: 12px; object-fit: contain; border: 2px solid var(--border-color); box-shadow: var(--shadow-sm);">
                         {% endif %}
                     </div>
                 </details>

@@ -257,7 +257,7 @@ def student_dashboard():
                 
                 if resume_text:
                     # Get ATS score
-                    resume_score, analysis = analyze_resume_quality(resume_text)
+                    resume_score, analysis = analyze_resume_quality(resume_text, interest_domain)
                     detailed_feedback = analysis
                     
                     # Extract skills

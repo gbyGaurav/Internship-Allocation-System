@@ -1,6 +1,85 @@
 import re
 from collections import Counter
 
+# ============================================================================
+# DOMAIN-SPECIFIC REQUIRED SKILLS MAPPING
+# ============================================================================
+
+DOMAIN_REQUIRED_SKILLS = {
+    "AI": [
+        "Python", "Machine Learning", "Deep Learning", "TensorFlow", "PyTorch", 
+        "Neural Networks", "NLP", "Computer Vision", "Scikit-learn", "Keras",
+        "Data Analysis", "NumPy", "Pandas", "AI", "Artificial Intelligence"
+    ],
+    "Artificial Intelligence": [
+        "Python", "Machine Learning", "Deep Learning", "TensorFlow", "PyTorch", 
+        "Neural Networks", "NLP", "Computer Vision", "Scikit-learn", "Keras",
+        "Data Analysis", "NumPy", "Pandas", "AI", "Artificial Intelligence"
+    ],
+    "Data Science": [
+        "Python", "Pandas", "NumPy", "SQL", "Data Analysis", "Machine Learning",
+        "Data Visualization", "Matplotlib", "Seaborn", "Statistics", "R",
+        "Excel", "Tableau", "Power BI", "Big Data", "Jupyter"
+    ],
+    "Cyber Security": [
+        "Network Security", "Linux", "Ethical Hacking", "Penetration Testing",
+        "Kali Linux", "Wireshark", "Metasploit", "Nmap", "Burp Suite",
+        "OWASP", "Security", "Firewall", "Cryptography", "TCP/IP"
+    ],
+    "Web Development": [
+        "HTML", "CSS", "JavaScript", "React", "Node.js", "MongoDB", "Express",
+        "Angular", "Vue.js", "TypeScript", "REST API", "Git", "Bootstrap",
+        "jQuery", "MySQL", "PostgreSQL", "Web Design", "Frontend", "Backend"
+    ],
+    "Mobile Development": [
+        "Android", "iOS", "React Native", "Flutter", "Kotlin", "Swift",
+        "Java", "Dart", "Mobile UI", "API Integration", "Firebase",
+        "App Development", "Xamarin", "Mobile Design"
+    ],
+    "Cloud Computing": [
+        "AWS", "Azure", "GCP", "Docker", "Kubernetes", "Cloud Architecture",
+        "EC2", "S3", "Lambda", "DevOps", "Linux", "Networking",
+        "Serverless", "CloudFormation", "Terraform"
+    ],
+    "DevOps": [
+        "Docker", "Kubernetes", "Jenkins", "Git", "CI/CD", "Linux",
+        "AWS", "Azure", "Terraform", "Ansible", "Chef", "Puppet",
+        "GitLab", "GitHub Actions", "Monitoring", "Automation"
+    ],
+    "General": [
+        "Python", "Java", "JavaScript", "Programming", "Problem Solving",
+        "Git", "Communication", "Teamwork", "Project Management"
+    ]
+}
+
+
+def get_domain_skills(domain: str) -> str:
+    """
+    Get required skills for a given domain
+    Returns comma-separated string of skills
+    """
+    if not domain:
+        domain = "General"
+    
+    domain_normalized = domain.strip()
+    
+    # Try exact match first
+    if domain_normalized in DOMAIN_REQUIRED_SKILLS:
+        skills = DOMAIN_REQUIRED_SKILLS[domain_normalized]
+        return ", ".join(skills)
+    
+    # Try case-insensitive match
+    for key in DOMAIN_REQUIRED_SKILLS:
+        if key.lower() == domain_normalized.lower():
+            skills = DOMAIN_REQUIRED_SKILLS[key]
+            return ", ".join(skills)
+    
+    # Default to General if not found
+    skills = DOMAIN_REQUIRED_SKILLS["General"]
+    return ", ".join(skills)
+
+
+
 def calculate_skill_match(student_skills: str, required: str) -> float:
     """Calculate skill match percentage between student and required skills"""
     if not student_skills or not required:
@@ -588,16 +667,26 @@ def run_smart_allocation(students, positions, resume_texts=None):
     
     return allocations
 
-def analyze_resume_quality(text: str):
+def analyze_resume_quality(text: str, domain: str = "General"):
     """
-    Analyze resume quality - used during profile update
+    Analyze resume quality with domain-specific skills
+    
+    Args:
+        text: Resume text content
+        domain: Student's domain of interest (AI, Data Science, Web Development, etc.)
+    
     Returns: (score, detailed_analysis)
     """
-    # Create a generic job description for baseline analysis
+    # Get domain-specific required skills
+    required_skills = get_domain_skills(domain)
+    
+    # Create job description with domain and skills
     job_desc = {
-        'domain': 'General',
-        'required_skills': '',
+        'domain': domain,
+        'required_skills': required_skills,
         'min_cgpa': 0
     }
+    
+    print(f"[RESUME ANALYSIS] Domain: {domain}, Required Skills: {required_skills[:100]}...")
     
     return analyze_resume_against_job(text, job_desc)
