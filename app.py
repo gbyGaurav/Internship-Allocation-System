@@ -1,123 +1,223 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
+from flask_mail import Mail, Message
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from functools import wraps
-from database import create_tables, get_connection
-from ai_engine import calculate_resume_quality_score, run_smart_allocation, calculate_skill_match
 import os
-import fitz
-from io import BytesIO
-import base64
+import traceback
+import sqlite3
+import fitz  # PyMuPDF
+from ai_engine import (
+    extract_skills_from_text,
+    analyze_resume_quality,
+    run_smart_allocation
+)
+from email_utils import send_allocation_email, send_bulk_allocation_emails
+from openpyxl import Workbook
+import io
+from datetime import datetime
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from openpyxl import Workbook
+from io import BytesIO
+import base64
+
+# ────────────────────────────────────────────────
+#  CONFIGURATION
+# ────────────────────────────────────────────────
 
 app = Flask(__name__)
-app.secret_key = "your_super_secret_key_change_in_production"
+app.secret_key = "super_secret_key_please_change_in_production"
 app.config['UPLOAD_FOLDER'] = os.path.join(os.getcwd(), 'uploads')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
+# Email configuration - FIXED WITH YOUR CREDENTIALS
+app.config['MAIL_SERVER']      = 'smtp.gmail.com'
+app.config['MAIL_PORT']        = 587
+app.config['MAIL_USE_TLS']     = True
+app.config['MAIL_USERNAME']    = 'bobxdev5@gmail.com'
+app.config['MAIL_PASSWORD']    = 'furksvdzojgmhfan'
+app.config['MAIL_DEFAULT_SENDER'] = 'bobxdev5@gmail.com'
+
+mail = Mail(app)
+
 ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'gif'}
+
+# ────────────────────────────────────────────────
+#  HELPER FUNCTIONS
+# ────────────────────────────────────────────────
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def role_required(required_role):
+    """Decorator to ensure user has the correct role"""
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            if 'user_id' not in session or session.get('role') != required_role:
+            if 'user_id' not in session:
+                flash("Please log in to access this page.", "error")
+                return redirect(url_for('login'))
+            
+            if session.get('role') != required_role:
+                flash(f"Access denied. This page is for {required_role}s only.", "error")
                 return render_template('403.html'), 403
+            
             return f(*args, **kwargs)
         return decorated_function
     return decorator
 
+def get_connection():
+    return sqlite3.connect("platform.db")
+
+def extract_text_from_pdf(pdf_path):
+    """Extract text from PDF using PyMuPDF"""
+    try:
+        text = ""
+        with fitz.open(pdf_path) as doc:
+            for page in doc:
+                text += page.get_text()
+        return text.strip()
+    except Exception as e:
+        print(f"[PDF ERROR] {str(e)}")
+        return ""
+
+# ────────────────────────────────────────────────
+#  ROUTES
+# ────────────────────────────────────────────────
+
 @app.route('/')
 def index():
-    if 'user_id' in session:
-        role = session.get('role')
-        if role == 'student':
-            return redirect(url_for('student_dashboard'))
-        elif role == 'company':
-            return redirect(url_for('company_dashboard'))
-        elif role == 'admin':
-            return redirect(url_for('admin_dashboard'))
-    return redirect(url_for('login'))
+    """Root route - redirect to appropriate dashboard based on role"""
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+
+    role = session.get('role')
+    print(f"[REDIRECT] User: {session.get('email')} | Role: {role}")
+
+    if role == 'student':
+        return redirect(url_for('student_dashboard'))
+    elif role == 'company':
+        return redirect(url_for('company_dashboard'))
+    elif role == 'admin':
+        return redirect(url_for('admin_dashboard'))
+    else:
+        print(f"[WARNING] Invalid role '{role}' for {session.get('email')}")
+        session.clear()
+        flash("Invalid session. Please log in again.", "warning")
+        return redirect(url_for('login'))
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Login route with proper role-based redirection"""
+    if request.method == 'POST':
+        email = request.form['email'].strip()
+        password = request.form['password']
+
+        with get_connection() as conn:
+            user = conn.execute(
+                "SELECT user_id, name, email, password, role FROM users WHERE email = ?",
+                (email,)
+            ).fetchone()
+
+            if user and check_password_hash(user[3], password):
+                # Clear any previous session
+                session.clear()
+                
+                # Set new session data
+                session['user_id'] = user[0]
+                session['name']   = user[1]
+                session['email']  = user[2]
+                session['role']   = user[4]
+
+                print(f"[LOGIN SUCCESS] {email} logged in as {user[4]}")
+                flash(f'Welcome back, {user[1]}!', 'success')
+                
+                # Redirect to appropriate dashboard
+                return redirect(url_for('index'))
+            else:
+                flash('Invalid email or password. Please try again.', 'error')
+
+    return render_template('login.html')
+
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+    """Registration route with profile creation"""
     if request.method == 'POST':
-        name = request.form.get('name')
-        email = request.form.get('email')
-        password = request.form.get('password')
-        role = request.form.get('role')
-        
-        if not all([name, email, password, role]):
-            return render_template('register.html', error="All fields are required")
-        
+        name     = request.form['name'].strip()
+        email    = request.form['email'].strip()
+        password = request.form['password']
+        role     = request.form['role']
+
+        # Validate role
         if role not in ['student', 'company']:
-            return render_template('register.html', error="Invalid role selected")
-        
-        hashed_password = generate_password_hash(password)
-        
-        try:
-            with get_connection() as conn:
-                cursor = conn.execute(
-                    "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
-                    (name, email, hashed_password, role)
-                )
-                user_id = cursor.lastrowid
+            flash('Invalid role selected.', 'error')
+            return render_template('register.html')
+
+        hashed = generate_password_hash(password)
+
+        with get_connection() as conn:
+            try:
+                # Check if email already exists
+                existing = conn.execute(
+                    "SELECT email FROM users WHERE email = ?", (email,)
+                ).fetchone()
                 
+                if existing:
+                    flash('Email already registered. Please login.', 'error')
+                    return render_template('register.html')
+
+                # Insert new user
+                conn.execute(
+                    "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
+                    (name, email, hashed, role)
+                )
+                conn.commit()
+
+                user_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+                # Create corresponding profile
                 if role == 'student':
                     conn.execute("INSERT INTO student_profile (user_id) VALUES (?)", (user_id,))
                 elif role == 'company':
                     conn.execute("INSERT INTO company_profile (user_id) VALUES (?)", (user_id,))
-                
+
                 conn.commit()
-                flash('Registration successful! Please login.', 'success')
+
+                print(f"[REGISTRATION SUCCESS] {email} registered as {role}")
+                flash('Registration successful! Please log in.', 'success')
                 return redirect(url_for('login'))
-        except Exception as e:
-            if "UNIQUE constraint failed" in str(e):
-                return render_template('register.html', error="Email already registered")
-            return render_template('register.html', error="Registration failed. Please try again.")
-    
+                
+            except sqlite3.IntegrityError as e:
+                flash('Email already registered.', 'error')
+                print(f"[REGISTRATION ERROR] {str(e)}")
+            except Exception as e:
+                flash(f'Registration error: {str(e)}', 'error')
+                print(f"[REGISTRATION ERROR] {str(e)}")
+
     return render_template('register.html')
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        email = request.form.get('email')
-        password = request.form.get('password')
-        
-        with get_connection() as conn:
-            user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-        
-        if user and check_password_hash(user[3], password):
-            session['user_id'] = user[0]
-            session['name'] = user[1]
-            session['role'] = user[4]
-            
-            if user[4] == 'student':
-                return redirect(url_for('student_dashboard'))
-            elif user[4] == 'company':
-                return redirect(url_for('company_dashboard'))
-            elif user[4] == 'admin':
-                return redirect(url_for('admin_dashboard'))
-        else:
-            return render_template('login.html', error="Invalid email or password")
-    
-    return render_template('login.html')
 
 @app.route('/logout')
 def logout():
+    """Logout route"""
+    user_email = session.get('email', 'Unknown')
+    print(f"[LOGOUT] {user_email}")
     session.clear()
+    flash('You have been logged out successfully.', 'success')
     return redirect(url_for('login'))
+
+
+# ────────────────────────────────────────────────
+#  STUDENT ROUTES
+# ────────────────────────────────────────────────
 
 @app.route('/student/dashboard', methods=['GET', 'POST'])
 @role_required('student')
 def student_dashboard():
-    user_id = session['user_id']
+    """Student dashboard with profile management and resume upload"""
     feedback_message = None
     resume_score = None
     detailed_feedback = None
@@ -128,323 +228,422 @@ def student_dashboard():
         interest_domain = request.form.get('interest_domain', '').strip()
         experience_years = int(request.form.get('experience_years', 0))
         past_education = request.form.get('past_education', '').strip()
-        
-        resume_path = None
-        extracted_skills = ""
-        
+
+        resume_file = request.files.get('resume')
+        photo_file = request.files.get('profile_photo')
+
         with get_connection() as conn:
-            current_profile = conn.execute("SELECT resume_path FROM student_profile WHERE user_id=?", (user_id,)).fetchone()
-            current_resume = current_profile[0] if current_profile else None
-        
-        if 'resume' in request.files:
-            file = request.files['resume']
-            if file and file.filename and allowed_file(file.filename):
-                filename = secure_filename(f"{user_id}_{file.filename}")
-                resume_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'students/resumes')
-                os.makedirs(resume_dir, exist_ok=True)
-                temp_path = os.path.join(resume_dir, filename)
-                file.save(temp_path)
+            # Get current profile
+            current = conn.execute(
+                "SELECT resume_path, profile_photo FROM student_profile WHERE user_id = ?",
+                (session['user_id'],)
+            ).fetchone()
+
+            resume_path = current[0] if current else None
+            photo_path = current[1] if current else None
+            extracted_skills = None
+
+            # Handle resume upload with AI analysis
+            if resume_file and allowed_file(resume_file.filename):
+                filename = secure_filename(resume_file.filename)
+                new_resume_path = os.path.join('students/resumes', f"{session['user_id']}_{filename}")
+                full_path = os.path.join(app.config['UPLOAD_FOLDER'], new_resume_path)
                 
-                try:
-                    doc = fitz.open(temp_path)
-                    text = ""
-                    for page in doc:
-                        text += page.get_text()
-                    doc.close()
+                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                resume_file.save(full_path)
+
+                # Extract and analyze resume
+                resume_text = extract_text_from_pdf(full_path)
+                
+                if resume_text:
+                    # Get ATS score
+                    resume_score, analysis = analyze_resume_quality(resume_text)
+                    detailed_feedback = analysis
                     
-                    if len(text.strip()) < 100:
-                        os.remove(temp_path)
-                        feedback_message = "⚠️ RESUME REJECTED: The uploaded PDF appears to be empty or has insufficient content. Please upload a proper resume with at least 100 characters."
-                        resume_score = 0
-                        resume_path = current_resume
+                    # Extract skills
+                    extracted_skills_list = extract_skills_from_text(resume_text)
+                    extracted_skills = ', '.join(extracted_skills_list) if extracted_skills_list else None
+                    
+                    # Build feedback message
+                    feedback_lines = [
+                        f"📊 Resume Score: {resume_score}/100",
+                        "",
+                        "📋 Detailed Analysis:"
+                    ]
+                    
+                    for category, data in analysis.items():
+                        status = "✅" if data['score'] >= data['max'] * 0.7 else "⚠️" if data['score'] >= data['max'] * 0.4 else "❌"
+                        feedback_lines.append(f"{status} {category}: {data['score']}/{data['max']} - {data['msg']}")
+                    
+                    if resume_score >= 50:
+                        resume_path = new_resume_path
+                        feedback_lines.append("")
+                        feedback_lines.append("✅ Resume accepted and saved!")
+                        if extracted_skills:
+                            feedback_lines.append(f"🤖 Extracted Skills: {extracted_skills}")
                     else:
-                        resume_score, detailed_feedback = calculate_resume_quality_score(text, interest_domain)
-                        
-                        feedback_lines = [f"Overall Score: {resume_score}/100\n"]
-                        for category, data in detailed_feedback.items():
-                            feedback_lines.append(f"{category}: {data['score']}/{data['max']} – {data['msg']}")
-                        
-                        feedback_message = "\n".join(feedback_lines)
-                        
-                        common_skills = [
-                            "python", "java", "javascript", "sql", "react", "angular", "vue",
-                            "node", "django", "flask", "machine learning", "data science",
-                            "aws", "azure", "docker", "git", "html", "css", "bootstrap",
-                            "cybersecurity", "network security", "ethical hacking", "tensorflow",
-                            "pytorch", "nlp", "computer vision", "pandas", "numpy", "scikit-learn",
-                            "mongodb", "postgresql", "redis", "kubernetes", "jenkins", "c++", "c#",
-                            "spring boot", "fastapi", "graphql", "rest api", "microservices"
-                        ]
-                        found = [s for s in common_skills if s in text.lower()]
-                        extracted_skills = ','.join(found) if found else ""
-                        
-                        if resume_score >= 50:
-                            resume_path = os.path.join('students/resumes', filename)
-                            feedback_message = "✅ " + feedback_message + "\n\n🎉 Your resume has been successfully saved!"
-                        else:
-                            os.remove(temp_path)
-                            resume_path = current_resume
-                            feedback_message = "❌ " + feedback_message + "\n\n⚠️ Your resume was NOT saved (score below 50/100). Your resume quality is too poor. Please improve based on the feedback above and upload again."
-                
-                except Exception as e:
-                    print(f"Resume processing error: {e}")
-                    os.remove(temp_path) if os.path.exists(temp_path) else None
-                    feedback_message = "❌ Could not read the resume file. Please upload a valid PDF with selectable text (not scanned image)."
-                    resume_path = current_resume
+                        # Delete rejected resume
+                        if os.path.exists(full_path):
+                            os.remove(full_path)
+                        feedback_lines.append("")
+                        feedback_lines.append("❌ Resume score too low (minimum 50/100 required)")
+                        feedback_lines.append("Please improve your resume and try again.")
+                    
+                    feedback_message = "\n".join(feedback_lines)
+                else:
+                    feedback_message = "❌ Could not extract text from PDF. Please ensure it's a valid resume."
                     resume_score = 0
-            else:
-                resume_path = current_resume
-        else:
-            resume_path = current_resume
-        
-        profile_photo = None
-        with get_connection() as conn:
-            current_profile = conn.execute("SELECT profile_photo FROM student_profile WHERE user_id=?", (user_id,)).fetchone()
-            current_photo = current_profile[0] if current_profile else None
-        
-        if 'profile_photo' in request.files:
-            file = request.files['profile_photo']
-            if file and file.filename and allowed_file(file.filename):
-                filename = secure_filename(f"{user_id}_{file.filename}")
-                photo_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'students/photos')
-                os.makedirs(photo_dir, exist_ok=True)
-                profile_photo = os.path.join('students/photos', filename)
-                full_path = os.path.join(app.config['UPLOAD_FOLDER'], profile_photo)
-                file.save(full_path)
-            else:
-                profile_photo = current_photo
-        else:
-            profile_photo = current_photo
-        
-        with get_connection() as conn:
-            conn.execute("""
-                UPDATE student_profile SET
-                    skills=?, cgpa=?, interest_domain=?, experience_years=?, past_education=?,
-                    resume_path=?, profile_photo=?, extracted_skills=?
-                WHERE user_id=?
-            """, (skills, cgpa, interest_domain, experience_years, past_education,
-                  resume_path, profile_photo, extracted_skills, user_id))
-            conn.commit()
-    
+
+            # Handle photo upload
+            if photo_file and allowed_file(photo_file.filename):
+                filename = secure_filename(photo_file.filename)
+                photo_path = os.path.join('students/photos', f"{session['user_id']}_{filename}")
+                full_path = os.path.join(app.config['UPLOAD_FOLDER'], photo_path)
+                
+                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                photo_file.save(full_path)
+
+            # Update profile
+            try:
+                conn.execute("""
+                    UPDATE student_profile 
+                    SET skills = ?, cgpa = ?, interest_domain = ?, 
+                        experience_years = ?, resume_path = ?, 
+                        past_education = ?, profile_photo = ?, extracted_skills = ?
+                    WHERE user_id = ?
+                """, (skills, cgpa, interest_domain, experience_years, 
+                      resume_path, past_education, photo_path, extracted_skills, session['user_id']))
+                conn.commit()
+
+                if not feedback_message:
+                    flash('Profile updated successfully!', 'success')
+                
+            except Exception as e:
+                flash(f'Error updating profile: {str(e)}', 'error')
+                print(f"[PROFILE UPDATE ERROR] {str(e)}")
+
+    # Get profile data
     with get_connection() as conn:
-        profile = conn.execute("SELECT * FROM student_profile WHERE user_id=?", (user_id,)).fetchone()
-        
+        profile = conn.execute("""
+            SELECT skills, cgpa, interest_domain, experience_years, 
+                   resume_path, past_education, profile_photo, extracted_skills
+            FROM student_profile 
+            WHERE user_id = ?
+        """, (session['user_id'],)).fetchone()
+
+        # Get allocation data
         allocation = conn.execute("""
-            SELECT c.company_name, p.domain, a.score, a.rank, p.stipend, c.location
+            SELECT cp.company_name, pos.domain, a.score, a.rank, pos.stipend, cp.location
             FROM allocations a
-            JOIN company_positions p ON a.position_id = p.position_id
-            JOIN company_profile c ON a.company_id = c.user_id
-            WHERE a.student_id=?
-        """, (user_id,)).fetchone()
-    
-    return render_template('student_dashboard.html',
-                          profile=profile,
+            JOIN company_profile cp ON a.company_id = cp.user_id
+            JOIN company_positions pos ON a.position_id = pos.position_id
+            WHERE a.student_id = ?
+        """, (session['user_id'],)).fetchone()
+
+    return render_template('student_dashboard.html', 
+                          profile=profile, 
                           allocation=allocation,
                           feedback_message=feedback_message,
                           resume_score=resume_score,
                           detailed_feedback=detailed_feedback)
 
 
+# ────────────────────────────────────────────────
+#  COMPANY ROUTES
+# ────────────────────────────────────────────────
+
 @app.route('/company/dashboard', methods=['GET', 'POST'])
 @role_required('company')
 def company_dashboard():
-    user_id = session['user_id']
-    
+    """Company dashboard with profile and position management"""
     if request.method == 'POST':
-        if 'add_position' in request.form:
-            domain = request.form.get('domain')
-            required_skills = request.form.get('required_skills')
+        # Check if adding position
+        if request.form.get('add_position'):
+            domain = request.form.get('domain', '').strip()
+            required_skills = request.form.get('required_skills', '').strip()
             min_cgpa = float(request.form.get('min_cgpa', 0))
             positions = int(request.form.get('positions', 0))
             stipend = int(request.form.get('stipend', 0))
-            
+
             with get_connection() as conn:
-                conn.execute("""
-                    INSERT INTO company_positions (company_id, domain, required_skills, min_cgpa, positions, stipend)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (user_id, domain, required_skills, min_cgpa, positions, stipend))
-                conn.commit()
-            
-            flash('Position added successfully!', 'success')
+                try:
+                    conn.execute("""
+                        INSERT INTO company_positions 
+                        (company_id, domain, required_skills, min_cgpa, positions, stipend)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (session['user_id'], domain, required_skills, min_cgpa, positions, stipend))
+                    conn.commit()
+                    flash('Position added successfully!', 'success')
+                except Exception as e:
+                    flash(f'Error adding position: {str(e)}', 'error')
         else:
-            company_name = request.form.get('company_name')
-            location = request.form.get('location')
-            contact_email = request.form.get('contact_email')
-            contact_no = request.form.get('contact_no')
-            
-            profile_logo = None
+            # Update company profile
+            company_name = request.form.get('company_name', '').strip()
+            location = request.form.get('location', '').strip()
+            contact_email = request.form.get('contact_email', '').strip()
+            contact_no = request.form.get('contact_no', '').strip()
+            logo_file = request.files.get('profile_logo')
+
             with get_connection() as conn:
-                current_profile = conn.execute("SELECT profile_logo FROM company_profile WHERE user_id=?", (user_id,)).fetchone()
-                current_logo = current_profile[0] if current_profile else None
-            
-            if 'profile_logo' in request.files:
-                file = request.files['profile_logo']
-                if file and file.filename and allowed_file(file.filename):
-                    filename = secure_filename(f"{user_id}_{file.filename}")
-                    logo_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'companies/logos')
-                    os.makedirs(logo_dir, exist_ok=True)
-                    profile_logo = os.path.join('companies/logos', filename)
-                    full_path = os.path.join(app.config['UPLOAD_FOLDER'], profile_logo)
-                    file.save(full_path)
-                else:
-                    profile_logo = current_logo
-            else:
-                profile_logo = current_logo
-            
-            with get_connection() as conn:
-                conn.execute("""
-                    UPDATE company_profile SET
-                        company_name=?, location=?, contact_email=?, contact_no=?, profile_logo=?
-                    WHERE user_id=?
-                """, (company_name, location, contact_email, contact_no, profile_logo, user_id))
-                conn.commit()
-            
-            flash('Profile updated successfully!', 'success')
-    
+                current = conn.execute(
+                    "SELECT profile_logo FROM company_profile WHERE user_id = ?",
+                    (session['user_id'],)
+                ).fetchone()
+
+                logo_path = current[0] if current else None
+
+                if logo_file and allowed_file(logo_file.filename):
+                    filename = secure_filename(logo_file.filename)
+                    logo_path = os.path.join('companies/logos', f"{session['user_id']}_{filename}")
+                    full_path = os.path.join(app.config['UPLOAD_FOLDER'], logo_path)
+                    
+                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                    logo_file.save(full_path)
+
+                try:
+                    conn.execute("""
+                        UPDATE company_profile 
+                        SET company_name = ?, location = ?, contact_email = ?, 
+                            contact_no = ?, profile_logo = ?
+                        WHERE user_id = ?
+                    """, (company_name, location, contact_email, contact_no, 
+                          logo_path, session['user_id']))
+                    conn.commit()
+                    flash('Company profile updated successfully!', 'success')
+                except Exception as e:
+                    flash(f'Error updating profile: {str(e)}', 'error')
+
+    # Get company data
     with get_connection() as conn:
-        profile = conn.execute("SELECT * FROM company_profile WHERE user_id=?", (user_id,)).fetchone()
-        positions = conn.execute("SELECT * FROM company_positions WHERE company_id=?", (user_id,)).fetchall()
-        
+        profile = conn.execute("""
+            SELECT company_name, location, contact_email, contact_no, profile_logo
+            FROM company_profile 
+            WHERE user_id = ?
+        """, (session['user_id'],)).fetchone()
+
+        positions = conn.execute("""
+            SELECT position_id, company_id, domain, required_skills, min_cgpa, positions, stipend
+            FROM company_positions 
+            WHERE company_id = ?
+        """, (session['user_id'],)).fetchall()
+
         allocated_students = conn.execute("""
-            SELECT u.name, sp.skills, sp.cgpa, sp.interest_domain, a.score, a.rank,
-                   sp.resume_path, sp.experience_years, sp.profile_photo, p.domain, sp.extracted_skills
+            SELECT u.name, sp.skills, sp.cgpa, sp.interest_domain, 
+                   a.score, a.rank, sp.resume_path, sp.experience_years,
+                   sp.profile_photo, pos.domain
             FROM allocations a
             JOIN users u ON a.student_id = u.user_id
             JOIN student_profile sp ON a.student_id = sp.user_id
-            JOIN company_positions p ON a.position_id = p.position_id
-            WHERE a.company_id=?
+            JOIN company_positions pos ON a.position_id = pos.position_id
+            WHERE a.company_id = ?
             ORDER BY a.rank
-        """, (user_id,)).fetchall()
-    
-    return render_template('company_dashboard.html',
-                          profile=profile,
+        """, (session['user_id'],)).fetchall()
+
+    return render_template('company_dashboard.html', 
+                          profile=profile, 
                           positions=positions,
                           allocated_students=allocated_students)
+
+
+# ────────────────────────────────────────────────
+#  ADMIN ROUTES
+# ────────────────────────────────────────────────
 
 @app.route('/admin/dashboard')
 @role_required('admin')
 def admin_dashboard():
+    """Admin dashboard showing all users and allocations"""
     with get_connection() as conn:
         students = conn.execute("""
-            SELECT u.user_id, u.name, u.email, sp.skills, sp.cgpa, sp.interest_domain,
-                   sp.experience_years, sp.resume_path, sp.past_education, sp.profile_photo
-            FROM users u
+            SELECT u.user_id, u.name, u.email, sp.skills, sp.cgpa, 
+                   sp.interest_domain, sp.experience_years, sp.resume_path, sp.profile_photo
+            FROM users u 
             LEFT JOIN student_profile sp ON u.user_id = sp.user_id
             WHERE u.role = 'student'
-            ORDER BY u.user_id
+            ORDER BY u.name
         """).fetchall()
-        
+
         companies = conn.execute("""
-            SELECT u.user_id, u.name, u.email, cp.company_name, cp.location,
-                   cp.contact_email, cp.contact_no, cp.profile_logo
-            FROM users u
+            SELECT u.user_id, u.name, u.email, cp.company_name, cp.location
+            FROM users u 
             LEFT JOIN company_profile cp ON u.user_id = cp.user_id
             WHERE u.role = 'company'
-            ORDER BY u.user_id
+            ORDER BY u.name
         """).fetchall()
-        
+
         allocations = conn.execute("""
-            SELECT u.name as student_name, c.company_name, p.domain, a.score, a.rank,
-                   sp.resume_path, sp.experience_years, sp.profile_photo, sp.skills, sp.cgpa
+            SELECT u.name, cp.company_name, pos.domain, a.score, a.rank,
+                   sp.resume_path, u.email, sp.profile_photo, sp.skills, sp.cgpa
             FROM allocations a
             JOIN users u ON a.student_id = u.user_id
-            JOIN company_profile c ON a.company_id = c.user_id
-            JOIN company_positions p ON a.position_id = p.position_id
+            JOIN company_profile cp ON a.company_id = cp.user_id
+            JOIN company_positions pos ON a.position_id = pos.position_id
             JOIN student_profile sp ON a.student_id = sp.user_id
             ORDER BY a.rank
         """).fetchall()
-        
-        documents = conn.execute("""
-            SELECT u.name, 
-                   CASE WHEN sp.resume_path IS NOT NULL THEN 'Resume' END as doc_type,
-                   sp.resume_path
-            FROM users u
-            JOIN student_profile sp ON u.user_id = sp.user_id
-            WHERE u.role = 'student' AND sp.resume_path IS NOT NULL
-            UNION ALL
-            SELECT u.name,
-                   CASE WHEN sp.profile_photo IS NOT NULL THEN 'Photo' END as doc_type,
-                   sp.profile_photo
-            FROM users u
-            JOIN student_profile sp ON u.user_id = sp.user_id
-            WHERE u.role = 'student' AND sp.profile_photo IS NOT NULL
-        """).fetchall()
-    
-    return render_template('admin_dashboard.html',
-                          students=students,
-                          companies=companies,
-                          allocations=allocations,
-                          documents=documents)
 
-@app.route('/admin/run_allocation', methods=['POST'])
+    return render_template('admin_dashboard.html', 
+                          students=students, 
+                          companies=companies,
+                          allocations=allocations)
+
+
+@app.route('/admin/allocate', methods=['POST'])
 @role_required('admin')
-def run_allocation():
+def admin_allocate():
+    """Run allocation algorithm with email notifications"""
+    send_emails = request.form.get('send_emails') == 'on'
+    
+    print("\n" + "="*80)
+    print("🚀 STARTING ALLOCATION PROCESS")
+    print(f"📧 Send emails: {send_emails}")
+    print("="*80 + "\n")
+    
     with get_connection() as conn:
+        # Get all students with profiles
         students = conn.execute("""
-            SELECT user_id, skills, cgpa, interest_domain, experience_years, extracted_skills
-            FROM student_profile
-            WHERE skills IS NOT NULL AND cgpa > 0 AND interest_domain IS NOT NULL
+            SELECT u.user_id, sp.skills, sp.cgpa, sp.interest_domain, 
+                   sp.experience_years, sp.extracted_skills
+            FROM users u
+            JOIN student_profile sp ON u.user_id = sp.user_id
+            WHERE u.role = 'student' AND sp.cgpa IS NOT NULL
         """).fetchall()
-        
+
+        # Get all positions
         positions = conn.execute("""
-            SELECT position_id, company_id, domain, required_skills, min_cgpa, positions, stipend
+            SELECT position_id, company_id, domain, required_skills, 
+                   min_cgpa, positions, stipend
             FROM company_positions
         """).fetchall()
-        
-        if not students or not positions:
-            flash('Need at least one student and one position to run allocation', 'error')
+
+        if not students:
+            flash('No students with complete profiles found.', 'warning')
             return redirect(url_for('admin_dashboard'))
-        
-        allocations = run_smart_allocation(students, positions)
-        
+
+        if not positions:
+            flash('No positions available. Companies must add positions first.', 'warning')
+            return redirect(url_for('admin_dashboard'))
+
+        # Load resume texts
+        resume_texts = {}
+        for student in students:
+            student_id = student[0]
+            resume_path_row = conn.execute(
+                "SELECT resume_path FROM student_profile WHERE user_id = ?",
+                (student_id,)
+            ).fetchone()
+            
+            if resume_path_row and resume_path_row[0]:
+                full_path = os.path.join(app.config['UPLOAD_FOLDER'], resume_path_row[0])
+                if os.path.exists(full_path):
+                    resume_texts[student_id] = extract_text_from_pdf(full_path)
+
+        # Run allocation algorithm
+        allocations = run_smart_allocation(students, positions, resume_texts)
+
+        # Clear previous allocations
         conn.execute("DELETE FROM allocations")
+        conn.commit()
+
+        # Save new allocations
+        email_data_list = []
         
-        for student_id, company_id, position_id, score, rank in allocations:
+        for sid, cid, pid, score, rank in allocations:
             conn.execute("""
                 INSERT INTO allocations (student_id, company_id, position_id, score, rank)
                 VALUES (?, ?, ?, ?, ?)
-            """, (student_id, company_id, position_id, score, rank))
+            """, (sid, cid, pid, score, rank))
+            
+            # Prepare email data if sending emails
+            if send_emails:
+                student_info = conn.execute("""
+                    SELECT u.email, u.name
+                    FROM users u
+                    WHERE u.user_id = ?
+                """, (sid,)).fetchone()
+                
+                company_info = conn.execute("""
+                    SELECT cp.company_name, cp.location, pos.domain, pos.stipend
+                    FROM company_profile cp
+                    JOIN company_positions pos ON pos.position_id = ?
+                    WHERE cp.user_id = ?
+                """, (pid, cid)).fetchone()
+                
+                if student_info and company_info:
+                    email_data_list.append({
+                        'student_email': student_info[0],
+                        'student_name': student_info[1],
+                        'company_name': company_info[0],
+                        'location': company_info[1] or 'Not specified',
+                        'domain': company_info[2],
+                        'stipend': company_info[3],
+                        'rank': rank,
+                        'match_score': int(score)
+                    })
         
         conn.commit()
-    
-    flash(f'Allocation completed successfully! {len(allocations)} students allocated.', 'success')
+
+        # Send emails if enabled
+        email_status = ""
+        if send_emails and email_data_list:
+            print(f"\n📧 Sending {len(email_data_list)} allocation emails...")
+            success_count, failed_count, errors = send_bulk_allocation_emails(mail, email_data_list)
+            
+            email_status = f" | Emails sent: {success_count}, Failed: {failed_count}"
+            
+            if failed_count > 0:
+                print(f"⚠️ Email failures:")
+                for error in errors:
+                    print(f"   - {error['student']}: {error['error']}")
+        
+        flash(f'Allocation completed! {len(allocations)} students matched{email_status}', 'success')
+        print(f"\n✅ Allocation complete: {len(allocations)} matches made\n")
+
     return redirect(url_for('admin_dashboard'))
+
 
 @app.route('/admin/analytics')
 @role_required('admin')
 def admin_analytics():
+    """Analytics page with charts"""
     with get_connection() as conn:
-        total_students = conn.execute("SELECT COUNT(*) FROM users WHERE role='student'").fetchone()[0]
-        allocated_students = conn.execute("SELECT COUNT(DISTINCT student_id) FROM allocations").fetchone()[0]
-    
-    success_rate = round((allocated_students / total_students * 100), 2) if total_students > 0 else 0
-    
-    labels = ['Allocated', 'Not Allocated']
-    sizes = [allocated_students, total_students - allocated_students]
-    colors = ['#27ae60', '#e74c3c']
-    
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90)
-    ax.axis('equal')
-    plt.title('Student Allocation Status', fontsize=16, fontweight='bold')
-    
-    buffer = BytesIO()
-    plt.savefig(buffer, format='png', bbox_inches='tight', dpi=100)
-    buffer.seek(0)
-    pie_chart = base64.b64encode(buffer.read()).decode()
-    plt.close()
-    
-    return render_template('admin_analytics.html',
-                          success_rate=success_rate,
+        total_students = conn.execute("SELECT COUNT(*) FROM users WHERE role = 'student'").fetchone()[0]
+        allocated = conn.execute("SELECT COUNT(DISTINCT student_id) FROM allocations").fetchone()[0]
+        
+        success_rate = round((allocated / total_students * 100) if total_students > 0 else 0, 1)
+        
+        # Create pie chart
+        fig, ax = plt.subplots(figsize=(8, 6))
+        sizes = [allocated, total_students - allocated]
+        labels = [f'Allocated ({allocated})', f'Not Allocated ({total_students - allocated})']
+        colors = ['#27ae60', '#e74c3c']
+        explode = (0.1, 0)
+        
+        ax.pie(sizes, explode=explode, labels=labels, colors=colors,
+               autopct='%1.1f%%', shadow=True, startangle=90)
+        ax.axis('equal')
+        plt.title('Student Allocation Status', fontsize=16, fontweight='bold')
+        
+        # Convert plot to base64
+        buf = BytesIO()
+        plt.savefig(buf, format='png', dpi=100, bbox_inches='tight')
+        buf.seek(0)
+        pie_chart = base64.b64encode(buf.read()).decode('utf-8')
+        plt.close()
+        
+    return render_template('admin_analytics.html', 
+                          success_rate=success_rate, 
                           pie_chart=pie_chart)
+
 
 @app.route('/admin/export_students')
 @role_required('admin')
 def export_students():
+    """Export students to Excel"""
     with get_connection() as conn:
         students = conn.execute("""
-            SELECT u.user_id, u.name, u.email, sp.skills, sp.cgpa, sp.interest_domain,
-                   sp.experience_years, sp.past_education
+            SELECT u.name, u.email, sp.skills, sp.cgpa, sp.interest_domain, 
+                   sp.experience_years
             FROM users u
             LEFT JOIN student_profile sp ON u.user_id = sp.user_id
             WHERE u.role = 'student'
@@ -454,71 +653,64 @@ def export_students():
     ws = wb.active
     ws.title = "Students"
     
-    headers = ['ID', 'Name', 'Email', 'Skills', 'CGPA', 'Domain', 'Experience', 'Education']
+    # Headers
+    headers = ['Name', 'Email', 'Skills', 'CGPA', 'Domain', 'Experience (years)']
     ws.append(headers)
     
+    # Data
     for student in students:
-        ws.append(student)
+        ws.append(list(student))
     
-    output = BytesIO()
+    # Save to bytes
+    output = io.BytesIO()
     wb.save(output)
     output.seek(0)
     
-    return send_file(output, 
-                    mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    as_attachment=True,
-                    download_name='students_export.xlsx')
+    return send_file(
+        output,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=f'students_{datetime.now().strftime("%Y%m%d")}.xlsx'
+    )
 
-@app.route('/admin/export_companies')
-@role_required('admin')
-def export_companies():
-    with get_connection() as conn:
-        companies = conn.execute("""
-            SELECT u.user_id, u.name, u.email, cp.company_name, cp.location,
-                   cp.contact_email, cp.contact_no
-            FROM users u
-            LEFT JOIN company_profile cp ON u.user_id = cp.user_id
-            WHERE u.role = 'company'
-        """).fetchall()
-    
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Companies"
-    
-    headers = ['ID', 'Contact Name', 'Email', 'Company Name', 'Location', 'Contact Email', 'Contact No']
-    ws.append(headers)
-    
-    for company in companies:
-        ws.append(company)
-    
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-    
-    return send_file(output,
-                    mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    as_attachment=True,
-                    download_name='companies_export.xlsx')
 
 @app.route('/uploads/<path:filename>')
 def uploaded_file(filename):
+    """Serve uploaded files"""
     return send_file(os.path.join(app.config['UPLOAD_FOLDER'], filename))
 
+
+# ────────────────────────────────────────────────
+#  INITIALIZATION
+# ────────────────────────────────────────────────
+
 if __name__ == '__main__':
+    # Create upload folders
+    os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'students/resumes'),  exist_ok=True)
+    os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'students/photos'),   exist_ok=True)
+    os.makedirs(os.path.join(app.config['UPLOAD_FOLDER'], 'companies/logos'),   exist_ok=True)
+
+    # Initialize database
+    from database import create_tables
     create_tables()
-    
+
+    # Create admin if not exists
     with get_connection() as conn:
-        admin_exists = conn.execute("SELECT * FROM users WHERE email='admin@platform.com'").fetchone()
-        
-        if not admin_exists:
-            hashed_password = generate_password_hash('admin123')
+        if not conn.execute("SELECT 1 FROM users WHERE email = 'admin@platform.com'").fetchone():
+            hashed = generate_password_hash('admin123')
             conn.execute(
                 "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)",
-                ('Admin', 'admin@platform.com', hashed_password, 'admin')
+                ('Admin', 'admin@platform.com', hashed, 'admin')
             )
             conn.commit()
-            print("✅ Admin user created - Email: admin@platform.com | Password: admin123")
+            print("✅ Admin user created: admin@platform.com / admin123")
+
+    print("\n" + "="*80)
+    print("🚀 INTERNSHIP ALLOCATION PLATFORM")
+    print("="*80)
+    print("📧 Email: CONFIGURED (bobxdev5@gmail.com)")
+    print("🔐 Admin: admin@platform.com / admin123")
+    print("🌐 Server: http://localhost:5000")
+    print("="*80 + "\n")
     
-    print("🚀 Starting Internship Allocation Platform...")
-    print("📧 Admin Login: admin@platform.com | Password: admin123")
     app.run(debug=True, host='0.0.0.0', port=5000)

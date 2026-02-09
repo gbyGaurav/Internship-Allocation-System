@@ -5,12 +5,130 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Student Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        /* Additional smooth animations */
+        .profile-card {
+            animation: fadeInUp 0.5s ease-out;
+        }
+        
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .card {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            transform: translateY(-2px);
+        }
+        
+        /* Smooth scroll */
+        html {
+            scroll-behavior: smooth;
+        }
+        
+        /* Progress indicator for resume score */
+        .score-progress {
+            width: 100%;
+            height: 12px;
+            background: #e2e8f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 16px 0;
+        }
+        
+        .score-progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #27ae60, #2ecc71);
+            border-radius: 10px;
+            transition: width 1s ease-out;
+            animation: fillBar 1.5s ease-out;
+        }
+        
+        @keyframes fillBar {
+            from { width: 0; }
+        }
+        
+        .score-progress-bar.medium {
+            background: linear-gradient(90deg, #f39c12, #f1c40f);
+        }
+        
+        .score-progress-bar.low {
+            background: linear-gradient(90deg, #e74c3c, #c0392b);
+        }
+        
+        /* Smooth flash messages */
+        .flash-messages {
+            animation: slideInRight 0.4s ease-out;
+        }
+        
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        /* Loading state */
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .loading-overlay.active {
+            display: flex;
+        }
+        
+        .loading-spinner {
+            width: 60px;
+            height: 60px;
+            border: 6px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
 </head>
 <body>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div>
+            <div class="loading-spinner"></div>
+            <p style="color: white; margin-top: 20px; font-size: 18px;">Processing...</p>
+        </div>
+    </div>
+
     <div class="container">
         <div class="header">
             <h1>🎓 Student Dashboard</h1>
             <div class="header-actions">
+                <span style="margin-right: 16px; color: #667eea; font-weight: 600;">{{ session.name }}</span>
                 <a href="/logout" class="logout-btn">Logout</a>
             </div>
         </div>
@@ -20,8 +138,8 @@
         <div class="card">
             <h2>👤 Your Profile Summary</h2>
             <div class="profile-card">
-                {% if profile[7] %}
-                <img src="/uploads/{{ profile[7] }}" alt="Profile Photo" class="profile-photo">
+                {% if profile[6] %}
+                <img src="/uploads/{{ profile[6] }}" alt="Profile Photo" class="profile-photo">
                 {% else %}
                 <div style="width: 120px; height: 120px; border-radius: 50%; background: var(--primary-gradient); display: flex; align-items: center; justify-content: center; font-size: 48px; color: white; box-shadow: var(--shadow-md);">
                     👤
@@ -30,12 +148,19 @@
                 
                 <div class="profile-info">
                     <h3>{{ session.name }}</h3>
-                    <p><strong>Skills:</strong> {{ profile[1] or 'Not specified' }}</p>
-                    <p><strong>CGPA:</strong> {{ profile[2] or 'Not specified' }}/10</p>
-                    <p><strong>Interest Domain:</strong> {{ profile[3] or 'Not specified' }}</p>
-                    <p><strong>Experience:</strong> {{ profile[4] or 0 }} years</p>
-                    {% if profile[5] %}
-                    <p><strong>Resume:</strong> <a href="/uploads/{{ profile[5] }}" target="_blank" style="color: #667eea; text-decoration: none; font-weight: 600;">📄 View Resume</a></p>
+                    <p><strong>📧 Email:</strong> {{ session.email }}</p>
+                    <p><strong>💼 Skills:</strong> {{ profile[0] or 'Not specified' }}</p>
+                    <p><strong>📊 CGPA:</strong> {{ profile[1] or 'Not specified' }}/10</p>
+                    <p><strong>🎯 Interest Domain:</strong> {{ profile[2] or 'Not specified' }}</p>
+                    <p><strong>⏳ Experience:</strong> {{ profile[3] or 0 }} years</p>
+                    {% if profile[4] %}
+                    <p><strong>📄 Resume:</strong> <a href="/uploads/{{ profile[4] }}" target="_blank" style="color: #667eea; text-decoration: none; font-weight: 600;">📥 Download Resume</a></p>
+                    {% endif %}
+                    {% if profile[7] %}
+                    <p style="margin-top: 12px; padding: 12px; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); border-radius: 10px;">
+                        <strong>🤖 AI-Extracted Skills:</strong> <span style="color: #667eea;">{{ profile[7] }}</span>
+                        <br><small style="color: #64748b; display: block; margin-top: 4px;">Automatically detected from your resume</small>
+                    </p>
                     {% endif %}
                 </div>
             </div>
@@ -44,77 +169,74 @@
 
         <!-- Profile Update Form -->
         <div class="card">
-            <h2>📋 Update Your Profile</h2>
-            <form method="POST" enctype="multipart/form-data">
+            <h2>📝 Update Your Profile</h2>
+            <form method="POST" enctype="multipart/form-data" id="profileForm">
                 <div class="form-group">
-                    <label for="skills">Skills (comma-separated)</label>
+                    <label for="skills">💼 Skills (comma-separated)</label>
                     <input type="text" id="skills" name="skills" 
                            placeholder="Python, JavaScript, React, MySQL, Machine Learning"
-                           value="{{ profile[1] if profile else '' }}" required>
+                           value="{{ profile[0] if profile else '' }}" required>
                     <small style="color: #64748b; display: block; margin-top: 6px;">💡 Tip: List your technical skills separated by commas</small>
                 </div>
 
-                <details>
-                    <summary>
-                        <span>Additional Profile Details</span>
-                        <span style="font-size: 12px; font-weight: normal; color: #64748b;">Click to expand ▼</span>
-                    </summary>
+                <div class="form-group">
+                    <label for="cgpa">📊 CGPA (0-10)</label>
+                    <input type="number" id="cgpa" name="cgpa" step="0.01" min="0" max="10"
+                           placeholder="8.5"
+                           value="{{ profile[1] if profile else '' }}" required>
+                </div>
 
-                    <div class="form-group">
-                        <label for="cgpa">CGPA (0-10)</label>
-                        <input type="number" id="cgpa" name="cgpa" step="0.01" min="0" max="10"
-                               placeholder="8.5"
-                               value="{{ profile[2] if profile else '' }}" required>
-                    </div>
+                <div class="form-group">
+                    <label for="interest_domain">🎯 Interest Domain</label>
+                    <select id="interest_domain" name="interest_domain" required>
+                        <option value="">-- Select Domain --</option>
+                        <option value="AI" {% if profile and profile[2] == 'AI' %}selected{% endif %}>🤖 Artificial Intelligence</option>
+                        <option value="Data Science" {% if profile and profile[2] == 'Data Science' %}selected{% endif %}>📊 Data Science</option>
+                        <option value="Cyber Security" {% if profile and profile[2] == 'Cyber Security' %}selected{% endif %}>🔒 Cyber Security</option>
+                        <option value="Web Development" {% if profile and profile[2] == 'Web Development' %}selected{% endif %}>🌐 Web Development</option>
+                        <option value="Mobile Development" {% if profile and profile[2] == 'Mobile Development' %}selected{% endif %}>📱 Mobile Development</option>
+                        <option value="Cloud Computing" {% if profile and profile[2] == 'Cloud Computing' %}selected{% endif %}>☁️ Cloud Computing</option>
+                        <option value="DevOps" {% if profile and profile[2] == 'DevOps' %}selected{% endif %}>⚙️ DevOps</option>
+                    </select>
+                </div>
 
-                    <div class="form-group">
-                        <label for="interest_domain">Interest Domain</label>
-                        <select id="interest_domain" name="interest_domain" required>
-                            <option value="">-- Select Domain --</option>
-                            <option value="AI" {% if profile and profile[3] == 'AI' %}selected{% endif %}>Artificial Intelligence</option>
-                            <option value="Data Science" {% if profile and profile[3] == 'Data Science' %}selected{% endif %}>Data Science</option>
-                            <option value="Cyber Security" {% if profile and profile[3] == 'Cyber Security' %}selected{% endif %}>Cyber Security</option>
-                            <option value="Web Development" {% if profile and profile[3] == 'Web Development' %}selected{% endif %}>Web Development</option>
-                            <option value="Mobile Development" {% if profile and profile[3] == 'Mobile Development' %}selected{% endif %}>Mobile Development</option>
-                            <option value="Cloud Computing" {% if profile and profile[3] == 'Cloud Computing' %}selected{% endif %}>Cloud Computing</option>
-                            <option value="DevOps" {% if profile and profile[3] == 'DevOps' %}selected{% endif %}>DevOps</option>
-                        </select>
-                    </div>
+                <div class="form-group">
+                    <label for="experience_years">⏳ Years of Experience</label>
+                    <input type="number" id="experience_years" name="experience_years" min="0" max="10"
+                           placeholder="0"
+                           value="{{ profile[3] if profile else '0' }}" required>
+                </div>
 
-                    <div class="form-group">
-                        <label for="experience_years">Years of Experience</label>
-                        <input type="number" id="experience_years" name="experience_years" min="0" max="10"
-                               placeholder="0"
-                               value="{{ profile[4] if profile else '' }}" required>
-                    </div>
+                <div class="form-group">
+                    <label for="past_education">🎓 Past Education</label>
+                    <textarea id="past_education" name="past_education" 
+                              placeholder="B.Tech in Computer Science, XYZ University, 2022–2026
+CGPA: 8.5/10
+Relevant Coursework: Data Structures, Algorithms, Machine Learning">{{ profile[5] if profile else '' }}</textarea>
+                </div>
 
-                    <div class="form-group">
-                        <label for="past_education">Past Education</label>
-                        <textarea id="past_education" name="past_education" 
-                                  placeholder="B.Tech in Computer Science, XYZ University, 2022–2026">{{ profile[6] if profile else '' }}</textarea>
-                    </div>
+                <div class="form-group">
+                    <label for="resume">📄 Upload Resume (PDF)</label>
+                    <input type="file" id="resume" name="resume" accept=".pdf">
+                    <small style="color: #e74c3c; display: block; margin-top: 6px; font-weight: 600;">
+                        ⚠️ Important: Your resume will be analyzed using AI. Resumes scoring below 50/100 will be rejected.
+                    </small>
+                    {% if profile and profile[4] %}
+                        <p style="margin-top: 12px; color: #27ae60; font-weight: 600;">✅ Current Resume: <a href="/uploads/{{ profile[4] }}" target="_blank" style="color: #667eea;">📥 Download</a></p>
+                    {% else %}
+                        <p style="margin-top: 12px; color: #f39c12; font-weight: 600;">⚠️ No resume uploaded yet</p>
+                    {% endif %}
+                </div>
 
-                    <div class="form-group">
-                        <label for="resume">Upload Resume (PDF)</label>
-                        <input type="file" id="resume" name="resume" accept=".pdf">
-                        <small style="color: #64748b; display: block; margin-top: 6px;">
-                            📌 Important: Your resume will be analyzed and scored. Resumes scoring below 50/100 will be rejected.
-                        </small>
-                        {% if profile[5] %}
-                            <p style="margin-top: 12px; color: #27ae60; font-weight: 600;">✅ Current Resume: <a href="/uploads/{{ profile[5] }}" target="_blank" style="color: #667eea;">View</a></p>
-                        {% endif %}
-                    </div>
+                <div class="form-group">
+                    <label for="profile_photo">📸 Upload Profile Photo</label>
+                    <input type="file" id="profile_photo" name="profile_photo" accept="image/*">
+                    {% if profile and profile[6] %}
+                        <img src="/uploads/{{ profile[6] }}" alt="Profile Photo" style="width: 100px; height: 100px; margin-top: 12px; border-radius: 50%; object-fit: cover; box-shadow: var(--shadow-md);">
+                    {% endif %}
+                </div>
 
-                    <div class="form-group">
-                        <label for="profile_photo">Upload Profile Photo</label>
-                        <input type="file" id="profile_photo" name="profile_photo" accept="image/*">
-                        {% if profile[7] %}
-                            <img src="/uploads/{{ profile[7] }}" alt="Profile Photo" style="width: 100px; height: 100px; margin-top: 12px; border-radius: 50%; object-fit: cover; box-shadow: var(--shadow-md);">
-                        {% endif %}
-                    </div>
-                </details>
-
-                <button type="submit">💾 Save Profile</button>
+                <button type="submit" onclick="showLoading()">💾 Save Profile</button>
             </form>
 
             <!-- Resume Feedback Section -->
@@ -131,6 +253,12 @@
                 {% if resume_score is not none %}
                     <div class="feedback-score" style="color: {% if resume_score >= 50 %}var(--success-color){% else %}var(--danger-color){% endif %};">
                         {{ resume_score }}/100
+                    </div>
+                    
+                    <!-- Progress Bar -->
+                    <div class="score-progress">
+                        <div class="score-progress-bar {% if resume_score >= 70 %}{% elif resume_score >= 50 %}medium{% else %}low{% endif %}" 
+                             style="width: {{ resume_score }}%"></div>
                     </div>
                     
                     {% if resume_score >= 80 %}
@@ -152,7 +280,7 @@
                                     <span style="color: {% if data.score >= data.max * 0.7 %}var(--success-color){% elif data.score >= data.max * 0.4 %}var(--warning-color){% else %}var(--danger-color){% endif %}; font-weight: 700;">
                                         {{ data.score }}/{{ data.max }}
                                     </span>
-                                    — {{ data.msg }}
+                                    – {{ data.msg }}
                                 </li>
                             {% endfor %}
                         </ul>
@@ -181,23 +309,69 @@
             {% if allocation %}
                 <div class="allocation-box">
                     <h3>🎉 Congratulations! You've been allocated!</h3>
-                    <p><strong>🏢 Company:</strong> {{ allocation[0] }}</p>
-                    <p><strong>💼 Domain:</strong> {{ allocation[1] }}</p>
-                    <p><strong>🎯 Match Score:</strong> {{ allocation[2] }}/100</p>
-                    <p><strong>💰 Stipend:</strong> ₹{{ allocation[4] }}/month</p>
-                    <p><strong>📍 Location:</strong> {{ allocation[5] }}</p>
-                    <p><strong>🏆 Your Rank:</strong> <span class="rank-badge">Rank #{{ allocation[3] }}</span></p>
+                    <div style="text-align: left; padding: 20px; background: rgba(255,255,255,0.1); border-radius: 16px; margin-top: 20px;">
+                        <p><strong>🏢 Company:</strong> {{ allocation[0] }}</p>
+                        <p><strong>💼 Domain:</strong> {{ allocation[1] }}</p>
+                        <p><strong>🎯 Match Score:</strong> {{ "%.2f"|format(allocation[2]) }}/100</p>
+                        <p><strong>🏆 Your Rank:</strong> <span style="background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%); color: #2c3e50; padding: 6px 16px; border-radius: 50px; font-weight: 700;">Rank #{{ allocation[3] }}</span></p>
+                        <p><strong>💰 Stipend:</strong> ₹{{ "{:,}".format(allocation[4]) }}/month</p>
+                        <p><strong>📍 Location:</strong> {{ allocation[5] }}</p>
+                    </div>
+                    
+                    <div style="margin-top: 32px; padding: 20px; background: rgba(255,255,255,0.15); border-radius: 12px; border: 2px solid rgba(255,255,255,0.3);">
+                        <h4 style="margin-bottom: 16px;">📬 Next Steps:</h4>
+                        <ol style="text-align: left; line-height: 2; padding-left: 24px;">
+                            <li>Check your email for allocation confirmation</li>
+                            <li>Wait for company to contact you</li>
+                            <li>Prepare for potential interviews</li>
+                            <li>Review the job requirements</li>
+                        </ol>
+                    </div>
                 </div>
             {% else %}
                 <div class="empty-state">
-                    <p>⏳</p>
-                    <p>No internship allocated yet.</p>
-                    <p style="font-size: 15px; margin-top: 12px; color: #64748b;">
-                        Complete your profile with a high-quality resume and wait for the admin to run the allocation process.
+                    <p style="font-size: 64px; margin-bottom: 16px;">⏳</p>
+                    <p style="font-size: 20px; font-weight: 600; margin-bottom: 12px;">No internship allocated yet</p>
+                    <p style="font-size: 15px; color: #64748b; line-height: 1.8;">
+                        Complete your profile with a high-quality resume (minimum score: 50/100)<br>
+                        and wait for the admin to run the allocation process.<br><br>
+                        💡 <strong>Tip:</strong> Upload a professional resume with clear sections for Education, Experience, and Skills to get a better match score!
                     </p>
                 </div>
             {% endif %}
         </div>
     </div>
+
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    <div class="flash-messages">
+        {% for category, message in messages %}
+        <div class="flash-message flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+    {% endwith %}
+
+    <script>
+        function showLoading() {
+            document.getElementById('loadingOverlay').classList.add('active');
+        }
+        
+        // Auto-hide flash messages after 5 seconds
+        setTimeout(() => {
+            const flashMessages = document.querySelectorAll('.flash-message');
+            flashMessages.forEach(msg => {
+                msg.style.transition = 'opacity 0.5s ease-out';
+                msg.style.opacity = '0';
+                setTimeout(() => msg.remove(), 500);
+            });
+        }, 5000);
+        
+        // Smooth scroll to top on page load
+        window.addEventListener('load', () => {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+    </script>
 </body>
 </html>
