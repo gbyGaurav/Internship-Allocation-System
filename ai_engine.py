@@ -202,331 +202,233 @@ def is_resume_fake_or_spam(text: str) -> tuple[bool, str]:
     if len(words) > 50:
         unique_words = set(words)
         uniqueness_ratio = len(unique_words) / len(words)
-        
-        if uniqueness_ratio < 0.3:  # Less than 30% unique words
-            return True, "Resume contains too much repetitive text (same words repeated excessively)"
+        if uniqueness_ratio < 0.3:
+            return True, "Resume has too much repetition (needs more variety in content)"
     
-    # Check 8: Names that sound fake (common test names)
-    fake_names = [
-        'john doe', 'jane doe', 'test user', 'sample name', 'your name',
-        'abc xyz', 'name surname', 'first last', 'student name', 'candidate name',
-        'asdf asdf', 'qwer qwer', 'test test', 'dummy user'
-    ]
-    for fake_name in fake_names:
-        if fake_name in text_lower:
-            return True, f"Resume contains placeholder name: '{fake_name}'"
-    
-    # Check 9: Must have some numbers (dates, percentages, GPA, phone, etc.)
-    numbers = re.findall(r'\d+', text)
-    if len(numbers) < 3:
-        return True, "Resume lacks numerical data (should include dates, GPA, percentages, contact info, etc.)"
-    
-    # Check 10: Suspicious patterns - all caps or no caps
-    if text.isupper():
-        return True, "Resume is entirely in UPPERCASE (appears unprofessional/spam)"
-    
-    if text.islower() and len(text) > 200:
-        return True, "Resume is entirely in lowercase (appears unprofessional/spam)"
-    
-    return False, "Resume appears legitimate"
+    return False, "Resume passed validation"
 
 
-def extract_skills_from_text(text: str) -> list:
-    """Extract technical skills from resume text"""
+def extract_skills_from_text(text: str) -> list[str]:
+    """
+    Extract technical skills from resume text
+    Returns: List of detected skills
+    """
+    if not text:
+        return []
+    
     text_lower = text.lower()
     
     # Comprehensive skill database
-    all_skills = {
-        # Programming Languages
-        "python", "java", "javascript", "c++", "c#", "ruby", "php", "swift", "kotlin", 
-        "go", "rust", "scala", "r", "matlab", "typescript", "dart", "perl", "vb.net",
-        
-        # Web Technologies
-        "html", "css", "react", "angular", "vue", "vue.js", "node.js", "express", 
-        "django", "flask", "fastapi", "spring boot", "asp.net", "bootstrap", "tailwind",
-        "jquery", "next.js", "nuxt.js", "svelte", "ember.js",
-        
-        # Databases
-        "sql", "mysql", "postgresql", "mongodb", "redis", "cassandra", "oracle",
-        "sqlite", "mariadb", "dynamodb", "firebase", "elasticsearch", "neo4j",
-        
-        # Cloud & DevOps
-        "aws", "azure", "gcp", "docker", "kubernetes", "jenkins", "gitlab", "github actions",
-        "terraform", "ansible", "chef", "puppet", "circleci", "travis ci",
-        
-        # Data Science & ML
-        "machine learning", "deep learning", "tensorflow", "pytorch", "keras", "scikit-learn",
-        "pandas", "numpy", "matplotlib", "seaborn", "nlp", "computer vision", "opencv",
-        "spacy", "nltk", "hugging face", "transformers", "neural networks",
-        
-        # Mobile Development
-        "android", "ios", "react native", "flutter", "xamarin", "cordova", "ionic",
-        
-        # Testing & QA
-        "selenium", "junit", "pytest", "jest", "mocha", "cypress", "testng",
-        
-        # Security
-        "cybersecurity", "network security", "ethical hacking", "penetration testing",
-        "kali linux", "metasploit", "wireshark", "nmap", "burp suite", "owasp",
-        
-        # Other Tools
-        "git", "github", "jira", "confluence", "postman", "swagger", "graphql",
-        "rest api", "microservices", "agile", "scrum", "kanban", "ci/cd"
-    }
+    all_skills = set()
+    for domain_skills in DOMAIN_REQUIRED_SKILLS.values():
+        all_skills.update([s.lower() for s in domain_skills])
     
+    # Find skills mentioned in resume
     found_skills = []
     for skill in all_skills:
-        if skill in text_lower:
-            found_skills.append(skill)
+        # Use word boundaries to avoid partial matches
+        pattern = r'\b' + re.escape(skill.lower()) + r'\b'
+        if re.search(pattern, text_lower):
+            found_skills.append(skill.title())
     
-    return list(set(found_skills))  # Remove duplicates
+    return sorted(list(set(found_skills)))
 
 
-def analyze_resume_against_job(resume_text: str, job_description: dict) -> tuple[float, dict]:
+def analyze_resume_against_job(resume_text: str, job_description: dict) -> tuple[int, dict]:
     """
-    Analyze resume against specific job description
-    THIS IS THE PRIMARY SCORING METHOD - Based on resume content vs job requirements
+    ENHANCED ATS-STYLE RESUME SCORING
     
-    Returns: (ats_score 0-100, detailed_analysis dict)
+    Analyzes resume quality and job-specific keyword matching
     
-    job_description should contain:
-    - domain: str
-    - required_skills: str (comma-separated)
-    - min_cgpa: float
+    Args:
+        resume_text: Full text content of resume
+        job_description: Dict with keys 'domain', 'required_skills', 'min_cgpa'
+    
+    Returns:
+        (score: int, analysis: dict) where score is 0-100
     """
-    text_lower = resume_text.lower()
-    total_score = 0.0
+    score = 0
     analysis = {
-        "Resume Quality": {"score": 0, "max": 25, "msg": ""},
-        "Job-Specific Keywords": {"score": 0, "max": 30, "msg": ""},
-        "Technical Skills Match": {"score": 0, "max": 25, "msg": ""},
-        "Experience & Impact": {"score": 0, "max": 20, "msg": ""}
+        'resume_quality': 0,
+        'keyword_match': 0,
+        'skill_match': 0,
+        'experience_signals': 0,
+        'breakdown': []
     }
     
-    # ===== 1. Resume Quality & Structure (25 points) =====
-    word_count = len(text_lower.split())
-    sections = ["education", "experience", "skills", "project", "internship", "certification", "summary"]
-    found_sections = sum(1 for s in sections if s in text_lower)
+    if not resume_text:
+        analysis['breakdown'].append("❌ No resume text provided")
+        return 0, analysis
     
+    text_lower = resume_text.lower()
+    words = text_lower.split()
+    
+    # ===== 1. RESUME QUALITY & STRUCTURE (25 points) =====
     quality_score = 0
     
-    # Word count scoring
+    # Word count (optimal: 200-600 words)
+    word_count = len(words)
     if 200 <= word_count <= 600:
-        quality_score += 15
-        analysis["Resume Quality"]["msg"] = f"✓ Optimal length ({word_count} words)"
-    elif word_count < 200:
-        quality_score += 8
-        analysis["Resume Quality"]["msg"] = f"⚠ Too brief ({word_count} words) - add more details"
-    elif word_count <= 800:
-        quality_score += 12
-        analysis["Resume Quality"]["msg"] = f"✓ Good length ({word_count} words)"
+        quality_score += 10
+        analysis['breakdown'].append(f"✅ Good length: {word_count} words (+10)")
+    elif 100 <= word_count < 200 or 600 < word_count <= 800:
+        quality_score += 5
+        analysis['breakdown'].append(f"⚠️ Acceptable length: {word_count} words (+5)")
     else:
-        quality_score += 8
-        analysis["Resume Quality"]["msg"] = f"⚠ Consider condensing ({word_count} words)"
+        analysis['breakdown'].append(f"⚠️ Length issue: {word_count} words (+0)")
     
-    # Section structure scoring
-    section_score = min(found_sections * 2, 10)
-    quality_score += section_score
-    analysis["Resume Quality"]["msg"] += f" | {found_sections}/{len(sections)} sections found"
-    analysis["Resume Quality"]["score"] = quality_score
-    total_score += quality_score
+    # Section structure
+    sections = ['education', 'experience', 'skills', 'projects', 'certifications']
+    sections_found = sum(1 for section in sections if section in text_lower)
     
-    # ===== 2. Job-Specific Keywords (30 points) =====
-    domain = job_description.get('domain', '').lower()
-    
-    # Domain-specific keyword databases
-    domain_keywords = {
-        "ai": ["ai", "artificial intelligence", "machine learning", "deep learning", "neural", 
-               "tensorflow", "pytorch", "nlp", "natural language", "computer vision", "data science",
-               "model", "algorithm", "prediction", "classification", "regression"],
-        "data science": ["data science", "data analysis", "analytics", "statistics", "statistical",
-                        "machine learning", "python", "r", "sql", "pandas", "numpy", "visualization", 
-                        "big data", "predictive", "modeling", "insights", "dashboard"],
-        "cyber security": ["cybersecurity", "security", "penetration testing", "ethical hacking",
-                          "network security", "firewall", "encryption", "vulnerability", "threat",
-                          "malware", "incident response", "security audit", "compliance", "owasp"],
-        "web development": ["web development", "frontend", "backend", "full stack", "html", "css",
-                           "javascript", "react", "angular", "vue", "node.js", "api", "rest",
-                           "responsive", "ui/ux", "website", "web application"],
-        "mobile development": ["mobile", "android", "ios", "app development", "react native", "flutter",
-                              "swift", "kotlin", "mobile app", "smartphone", "mobile ui"],
-        "cloud computing": ["cloud", "aws", "azure", "gcp", "cloud computing", "serverless", "iaas",
-                           "paas", "saas", "cloud architecture", "cloud migration", "devops"],
-        "devops": ["devops", "ci/cd", "continuous integration", "continuous deployment", "docker",
-                  "kubernetes", "jenkins", "gitlab", "automation", "infrastructure", "deployment"]
-    }
-    
-    # Normalize domain for matching
-    domain_normalized = normalize_domain(domain)
-    matched_domain_key = None
-    
-    for key in domain_keywords.keys():
-        if normalize_domain(key) == domain_normalized:
-            matched_domain_key = key
-            break
-    
-    if matched_domain_key:
-        keywords = domain_keywords[matched_domain_key]
-        found_keywords = sum(1 for kw in keywords if kw in text_lower)
-        keyword_score = min((found_keywords / len(keywords)) * 30, 30)
-        analysis["Job-Specific Keywords"]["score"] = round(keyword_score, 1)
-        analysis["Job-Specific Keywords"]["msg"] = f"Found {found_keywords}/{len(keywords)} domain keywords"
+    if sections_found >= 4:
+        quality_score += 10
+        analysis['breakdown'].append(f"✅ Excellent structure: {sections_found}/5 sections (+10)")
+    elif sections_found >= 2:
+        quality_score += 5
+        analysis['breakdown'].append(f"⚠️ Basic structure: {sections_found}/5 sections (+5)")
     else:
-        # Generic scoring if domain not recognized
-        analysis["Job-Specific Keywords"]["score"] = 0
-        analysis["Job-Specific Keywords"]["msg"] = f"Domain '{domain}' not in database - manual review needed"
+        analysis['breakdown'].append(f"❌ Poor structure: {sections_found}/5 sections (+0)")
     
-    total_score += analysis["Job-Specific Keywords"]["score"]
+    # Professional formatting indicators
+    formatting_keywords = ['•', '-', ':', 'bachelor', 'master', 'degree', 'gpa', 'cgpa']
+    formatting_score = min(sum(2 for kw in formatting_keywords if kw in text_lower), 5)
+    quality_score += formatting_score
     
-    # ===== 3. Technical Skills Match (25 points) =====
+    if formatting_score > 0:
+        analysis['breakdown'].append(f"✅ Professional formatting (+{formatting_score})")
+    
+    score += quality_score
+    analysis['resume_quality'] = quality_score
+    
+    # ===== 2. JOB-SPECIFIC KEYWORDS (30 points) =====
+    keyword_score = 0
+    
+    domain = job_description.get('domain', 'General')
+    domain_keywords = DOMAIN_REQUIRED_SKILLS.get(domain, DOMAIN_REQUIRED_SKILLS['General'])
+    
+    # Keywords found in resume
+    keywords_found = []
+    for keyword in domain_keywords:
+        pattern = r'\b' + re.escape(keyword.lower()) + r'\b'
+        if re.search(pattern, text_lower):
+            keywords_found.append(keyword)
+    
+    keyword_match_percent = (len(keywords_found) / len(domain_keywords)) * 100 if domain_keywords else 0
+    keyword_score = min(int(keyword_match_percent * 0.3), 30)
+    
+    score += keyword_score
+    analysis['keyword_match'] = keyword_score
+    analysis['breakdown'].append(
+        f"🎯 Domain keywords: {len(keywords_found)}/{len(domain_keywords)} found ({keyword_match_percent:.0f}%) (+{keyword_score})"
+    )
+    
+    # ===== 3. TECHNICAL SKILLS MATCH (25 points) =====
+    skill_score = 0
+    
     required_skills = job_description.get('required_skills', '')
     if required_skills:
-        required_skills_list = [s.strip().lower() for s in required_skills.split(',') if s.strip()]
+        required_list = [s.strip().lower() for s in required_skills.split(',')]
+        skills_matched = []
         
-        if required_skills_list:
-            # Extract skills from resume
-            extracted_skills = extract_skills_from_text(text_lower)
-            extracted_skills_lower = [s.lower() for s in extracted_skills]
-            
-            # Calculate match
-            matched_skills = []
-            for req_skill in required_skills_list:
-                # Check exact match or partial match
-                if req_skill in extracted_skills_lower or any(req_skill in es for es in extracted_skills_lower):
-                    matched_skills.append(req_skill)
-            
-            match_percentage = len(matched_skills) / len(required_skills_list)
-            skill_score = match_percentage * 25
-            
-            analysis["Technical Skills Match"]["score"] = round(skill_score, 1)
-            analysis["Technical Skills Match"]["msg"] = f"Matched {len(matched_skills)}/{len(required_skills_list)} required skills"
-            
-            if matched_skills:
-                analysis["Technical Skills Match"]["msg"] += f": {', '.join(matched_skills[:5])}"
-        else:
-            analysis["Technical Skills Match"]["score"] = 0
-            analysis["Technical Skills Match"]["msg"] = "No required skills specified"
+        for req_skill in required_list:
+            pattern = r'\b' + re.escape(req_skill) + r'\b'
+            if re.search(pattern, text_lower):
+                skills_matched.append(req_skill)
+        
+        skill_match_percent = (len(skills_matched) / len(required_list)) * 100 if required_list else 0
+        skill_score = min(int(skill_match_percent * 0.25), 25)
+        
+        score += skill_score
+        analysis['skill_match'] = skill_score
+        analysis['breakdown'].append(
+            f"🔧 Required skills: {len(skills_matched)}/{len(required_list)} matched ({skill_match_percent:.0f}%) (+{skill_score})"
+        )
     else:
-        analysis["Technical Skills Match"]["score"] = 0
-        analysis["Technical Skills Match"]["msg"] = "No required skills specified"
+        analysis['breakdown'].append("⚠️ No specific skills required (+0)")
     
-    total_score += analysis["Technical Skills Match"]["score"]
+    # ===== 4. EXPERIENCE & IMPACT INDICATORS (20 points) =====
+    experience_score = 0
     
-    # ===== 4. Experience & Impact Language (20 points) =====
-    # Action verbs and achievement language
-    action_verbs = [
-        "developed", "created", "built", "designed", "implemented", "achieved", "improved",
-        "optimized", "managed", "led", "coordinated", "delivered", "launched", "deployed",
-        "established", "increased", "reduced", "enhanced", "automated", "streamlined"
-    ]
+    # Action verbs (shows active contribution)
+    action_verbs = ['achieved', 'improved', 'developed', 'created', 'designed', 'implemented',
+                    'built', 'led', 'managed', 'optimized', 'increased', 'decreased']
+    action_count = sum(1 for verb in action_verbs if verb in text_lower)
+    experience_score += min(action_count * 2, 10)
     
-    found_actions = sum(1 for verb in action_verbs if verb in text_lower)
-    action_score = min(found_actions * 1.5, 10)
+    if action_count > 0:
+        analysis['breakdown'].append(f"✅ Action verbs: {action_count} found (+{min(action_count * 2, 10)})")
     
-    # Quantifiable achievements (numbers, percentages)
-    quantifiable_patterns = [
-        r'\d+%',  # Percentages
-        r'\d+x',  # Multipliers
-        r'increased.*\d+',
-        r'reduced.*\d+',
-        r'improved.*\d+',
-        r'saved.*\d+',
-        r'\d+.*users',
-        r'\d+.*customers',
-        r'\d+.*projects'
-    ]
+    # Quantifiable results (numbers, percentages, metrics)
+    numbers = re.findall(r'\d+%|\d+x|\d+\+', text_lower)
+    metrics_score = min(len(numbers) * 2, 10)
+    experience_score += metrics_score
     
-    has_quantifiable = any(re.search(pattern, text_lower) for pattern in quantifiable_patterns)
-    quantifiable_score = 10 if has_quantifiable else 5
+    if metrics_score > 0:
+        analysis['breakdown'].append(f"📊 Quantifiable results: {len(numbers)} metrics (+{metrics_score})")
     
-    experience_score = action_score + quantifiable_score
-    analysis["Experience & Impact"]["score"] = min(round(experience_score, 1), 20)
+    score += experience_score
+    analysis['experience_signals'] = experience_score
     
-    if has_quantifiable and found_actions >= 3:
-        analysis["Experience & Impact"]["msg"] = "✓ Strong achievement language with quantifiable results"
-    elif has_quantifiable:
-        analysis["Experience & Impact"]["msg"] = "Good quantifiable achievements - add more action verbs"
-    elif found_actions >= 3:
-        analysis["Experience & Impact"]["msg"] = "Good action verbs - add quantifiable results"
-    else:
-        analysis["Experience & Impact"]["msg"] = "Add action verbs and quantifiable achievements"
+    # ===== FINAL SCORE =====
+    final_score = min(score, 100)
     
-    total_score += analysis["Experience & Impact"]["score"]
-    
-    # Ensure score is within bounds
-    total_score = min(max(total_score, 0), 100.0)
-    
-    return round(total_score, 1), analysis
-
-
-def calculate_resume_quality_score(text: str, domain: str = "") -> tuple[float, dict]:
-    """
-    LEGACY FUNCTION - Now redirects to analyze_resume_against_job
-    Kept for backwards compatibility
-    """
-    # Create a basic job description
-    job_desc = {
-        'domain': domain,
-        'required_skills': '',
-        'min_cgpa': 0
-    }
-    
-    return analyze_resume_against_job(text, job_desc)
+    return final_score, analysis
 
 
 def student_company_position_score(student, position, resume_text=None):
     """
-    Calculate match score between student and position
-    PRIMARY METHOD: Score based on resume content vs job requirements
+    Calculate match score for student-position pair
+    Uses RESUME-FIRST approach (60% weight on resume ATS analysis)
     
-    Scoring breakdown:
-    - 60% Resume ATS score (analyzed against job description)
-    - 20% CGPA
-    - 10% Experience
-    - 10% Extracted skills bonus
+    Args:
+        student: (user_id, name, email, skills, cgpa, domain, exp, resume_path, profile_photo, extracted_skills)
+        position: (position_id, company_id, domain, required_skills, min_cgpa, positions, stipend)
+        resume_text: Full resume text (if available)
     
-    CRITICAL: Fake resumes are automatically disqualified (score = 0)
+    Returns:
+        float: Score 0-100
     """
-    sid, skills, cgpa, interest_domain, exp, extracted_skills = student
-    pid, cid, pdomain, req_skills, min_cgpa, pos, stipend = position
-
-    # REQUIREMENT 1: Domain MUST match
-    if normalize_domain(interest_domain) != normalize_domain(pdomain):
-        return 0.0
-
-    # REQUIREMENT 2: CGPA MUST meet minimum
-    if cgpa < min_cgpa:
-        return 0.0
-
-    # REQUIREMENT 3: Resume MUST NOT be fake
-    if resume_text:
-        is_fake, fake_reason = is_resume_fake_or_spam(resume_text)
-        if is_fake:
-            print(f"  ⚠️  Student {sid} DISQUALIFIED: {fake_reason}")
-            return 0.0
-
-    score = 0.0
+    sid = student[0]
+    cgpa = student[4] or 0
+    sdomain = student[5] or ""
+    exp = student[6] or 0
+    extracted_skills = student[9] or ""
     
-    # PRIMARY SCORING: Resume content analysis (60 points max)
-    if resume_text:
-        job_desc = {
-            'domain': pdomain,
-            'required_skills': req_skills,
-            'min_cgpa': min_cgpa
-        }
-        ats_score, analysis = analyze_resume_against_job(resume_text, job_desc)
-        
-        # 60% weight on resume ATS score
-        score += ats_score * 0.6
-        
-        print(f"  📄 Student {sid} ATS Score: {ats_score}/100")
-        print(f"     Domain: {pdomain} | Required Skills: {req_skills[:50]}...")
-    else:
-        # NO RESUME = Major penalty, only 15 points max from skills
-        all_skills = (skills + ',' + extracted_skills) if extracted_skills else skills
-        skill_match = calculate_skill_match(all_skills, req_skills)
-        score += skill_match * 0.15
-        print(f"  ⚠️  Student {sid} has NO RESUME - Limited to {score:.1f} points from skills")
+    pid = position[0]
+    pdomain = position[2]
+    req_skills = position[3]
+    min_cgpa = position[4]
+    
+    # Domain must match
+    if normalize_domain(sdomain) != normalize_domain(pdomain):
+        print(f"  ❌ Domain mismatch: Student wants {sdomain}, Position is {pdomain}")
+        return 0
+    
+    # CGPA must meet minimum
+    if cgpa < min_cgpa:
+        print(f"  ❌ CGPA too low: {cgpa} < {min_cgpa}")
+        return 0
+    
+    score = 0
+    
+    # Resume-based ATS scoring (60% of total score)
+    if not resume_text:
+        print(f"  ❌ Student {sid} has NO RESUME - cannot score")
+        return 0
+    
+    job_desc = {
+        'domain': pdomain,
+        'required_skills': req_skills,
+        'min_cgpa': min_cgpa
+    }
+    ats_score, analysis = analyze_resume_against_job(resume_text, job_desc)
+    
+    # 60% weight on resume ATS score
+    score += ats_score * 0.6
+    
+    print(f"  ✅ Student {sid} ATS Score: {ats_score}/100")
+    print(f"     Domain: {pdomain} | Required Skills: {req_skills[:50]}...")
 
     # CGPA contribution (20 points max)
     cgpa_points = (cgpa / 10.0) * 20
@@ -550,59 +452,63 @@ def student_company_position_score(student, position, resume_text=None):
 
 def run_smart_allocation(students, positions, resume_texts=None):
     """
-    Run smart allocation algorithm with STRICT fake resume detection
+    FAIR ROUND-ROBIN ALLOCATION ALGORITHM
     
-    students: list of tuples (user_id, skills, cgpa, interest_domain, experience_years, extracted_skills)
-    positions: list of tuples (position_id, company_id, domain, required_skills, min_cgpa, positions, stipend)
-    resume_texts: dict {student_id: resume_text}
+    Strategy:
+    1. Validate all resumes (existing logic)
+    2. Calculate scores for all student-position pairs
+    3. GROUP matches by position/company
+    4. Use ROUND-ROBIN allocation to ensure fair distribution
+    5. Allocate best student to each company in turns
     
-    CRITICAL CHANGES:
-    1. Students with fake resumes are COMPLETELY EXCLUDED
-    2. Students without resumes get heavily penalized but not excluded
-    3. Scoring is PRIMARY based on resume content vs job requirements
+    Returns: List of allocations (student_id, company_id, position_id, score, rank)
     """
     if resume_texts is None:
         resume_texts = {}
     
     print("\n" + "=" * 80)
-    print("🔍 PHASE 1: VALIDATING STUDENT RESUMES")
+    print("🔍 PHASE 1: STRICT RESUME VALIDATION (RESUME REQUIRED!)")
     print("=" * 80)
     
-    # Filter out students with fake resumes BEFORE allocation
     valid_students = []
-    fake_count = 0
     no_resume_count = 0
+    fake_count = 0
     
     for student in students:
         student_id = student[0]
         resume_text = resume_texts.get(student_id, None)
         
-        if resume_text:
-            is_fake, fake_reason = is_resume_fake_or_spam(resume_text)
-            if is_fake:
-                print(f"❌ Student {student_id} EXCLUDED: {fake_reason}")
-                fake_count += 1
-                # DO NOT add to valid_students
-            else:
-                print(f"✅ Student {student_id}: Resume validated")
-                valid_students.append(student)
-        else:
-            print(f"❌ Student {student_id} EXCLUDED: No resume uploaded")
+        if not resume_text:
+            print(f"❌ Student {student_id} EXCLUDED: NO RESUME UPLOADED (MANDATORY)")
             no_resume_count += 1
-            # DO NOT add to valid_students - students MUST have resumes
+            continue
+        
+        is_fake, fake_reason = is_resume_fake_or_spam(resume_text)
+        if is_fake:
+            print(f"❌ Student {student_id} EXCLUDED: {fake_reason}")
+            fake_count += 1
+            continue
+        
+        print(f"✅ Student {student_id}: Resume validated")
+        valid_students.append(student)
     
     print(f"\n📊 VALIDATION SUMMARY:")
     print(f"   Total students: {len(students)}")
-    print(f"   Valid resumes: {len(valid_students) - no_resume_count}")
-    print(f"   No resume (excluded): {no_resume_count}")
-    print(f"   Fake resumes (excluded): {fake_count}")
+    print(f"   Valid resumes: {len(valid_students)}")
+    print(f"   No resume (EXCLUDED): {no_resume_count}")
+    print(f"   Fake resumes (EXCLUDED): {fake_count}")
     print(f"   Eligible for allocation: {len(valid_students)}")
+    
+    if not valid_students:
+        print("\n⚠️ NO ELIGIBLE STUDENTS FOUND - ALLOCATION ABORTED")
+        return []
     
     print("\n" + "=" * 80)
     print("🎯 PHASE 2: CALCULATING MATCH SCORES")
     print("=" * 80)
     
-    matches = []
+    # Build position-specific candidate lists
+    position_candidates_map = {}  # position_id -> [(student_id, company_id, score), ...]
     
     for position in positions:
         pid = position[0]
@@ -612,60 +518,142 @@ def run_smart_allocation(students, positions, resume_texts=None):
         
         print(f"\n📋 Position {pid}: {domain} at Company {company_id} ({pos_num} openings)")
         
-        position_matches = []
+        position_candidates = []
         for student in valid_students:
             student_id = student[0]
             resume_text = resume_texts.get(student_id, None)
             score = student_company_position_score(student, position, resume_text)
             
             if score > 0:
-                position_matches.append((student_id, score))
+                position_candidates.append({
+                    'student_id': student_id,
+                    'company_id': company_id,
+                    'position_id': pid,
+                    'score': score
+                })
         
-        # Sort by score (highest first)
-        position_matches.sort(key=lambda x: x[1], reverse=True)
+        # Sort candidates for this position by score (highest first)
+        position_candidates.sort(key=lambda x: x['score'], reverse=True)
+        position_candidates_map[pid] = position_candidates
         
-        print(f"✅ {len(position_matches)} eligible students for this position")
-        if position_matches:
-            print(f"   Top 3 scores: {[f'{s[0]}:{s[1]:.1f}' for s in position_matches[:3]]}")
-        
-        matches.append((pid, company_id, pos_num, position_matches))
-    
-    # Sort positions by best candidate score
-    matches.sort(key=lambda x: x[3][0][1] if x[3] else 0, reverse=True)
+        if position_candidates:
+            print(f"   Eligible candidates: {len(position_candidates)}")
+            print(f"   Top 3 scores: {[f'S{c['student_id']}:{c['score']:.1f}' for c in position_candidates[:3]]}")
     
     print("\n" + "=" * 80)
-    print("🎓 PHASE 3: ALLOCATING STUDENTS TO POSITIONS")
+    print("🎓 PHASE 3: FAIR ROUND-ROBIN ALLOCATION")
     print("=" * 80)
     
+    # ========== FAIR ALLOCATION LOGIC ==========
+    
     allocations = []
-    taken = set()
+    taken_students = set()
+    position_info = {}
     
-    for pid, cid, pos_num, pmatches in matches:
-        count = 0
-        rank = 1
+    # Initialize position tracking
+    for position in positions:
+        pid = position[0]
+        position_info[pid] = {
+            'allocated': 0,
+            'max_positions': position[5],
+            'company_id': position[1],
+            'domain': position[2],
+            'current_rank': 1
+        }
+    
+    # Create a queue of positions that still need allocations
+    active_positions = list(position_info.keys())
+    
+    print(f"\n🔄 Round-robin allocation across {len(active_positions)} positions...\n")
+    
+    allocation_round = 1
+    while active_positions:
+        print(f"--- Round {allocation_round} ---")
+        positions_allocated_this_round = 0
+        positions_to_remove = []
         
-        print(f"\n🏢 Allocating for Position {pid}:")
-        
-        for sid, score in pmatches:
-            if sid not in taken and count < pos_num:
+        # Try to allocate one student to each active position
+        for pid in active_positions:
+            info = position_info[pid]
+            
+            # Check if position is full
+            if info['allocated'] >= info['max_positions']:
+                positions_to_remove.append(pid)
+                continue
+            
+            # Get next best available student for this position
+            candidates = position_candidates_map.get(pid, [])
+            allocated_to_position = False
+            
+            for candidate in candidates:
+                sid = candidate['student_id']
+                
+                # Skip if student already allocated
+                if sid in taken_students:
+                    continue
+                
+                # Allocate this student
+                cid = candidate['company_id']
+                score = candidate['score']
+                rank = info['current_rank']
+                
                 allocations.append((sid, cid, pid, score, rank))
-                taken.add(sid)
-                print(f"   ✅ Rank {rank}: Student {sid} - Score {score:.1f}/100")
-                count += 1
-                rank += 1
+                taken_students.add(sid)
+                info['allocated'] += 1
+                info['current_rank'] += 1
+                positions_allocated_this_round += 1
+                allocated_to_position = True
+                
+                print(f"   ✅ Student {sid} → Company {cid}, Position {pid} (Rank #{rank}, Score: {score:.1f})")
+                break
+            
+            # If no student was allocated and position still has space, check if any candidates remain
+            if not allocated_to_position and info['allocated'] < info['max_positions']:
+                # Check if there are any unallocated students left for this position
+                has_available = any(c['student_id'] not in taken_students for c in candidates)
+                if not has_available:
+                    positions_to_remove.append(pid)
         
-        print(f"   Filled: {count}/{pos_num} positions")
+        # Remove positions that are full or have no more candidates
+        for pid in positions_to_remove:
+            if pid in active_positions:
+                active_positions.remove(pid)
+                print(f"   ℹ️ Position {pid} complete or no more candidates")
+        
+        # Break if no allocations were made this round
+        if positions_allocated_this_round == 0:
+            print(f"   ⚠️ No allocations possible this round - ending allocation")
+            break
+        
+        allocation_round += 1
+        print()
     
-    print("\n" + "=" * 80)
+    print("=" * 80)
     print("✅ ALLOCATION COMPLETE")
     print("=" * 80)
     print(f"Total allocations: {len(allocations)}")
-    print(f"Students allocated: {len(taken)}")
-    print(f"Students not allocated: {len(valid_students) - len(taken)}")
-    print(f"Students excluded (fake resumes): {fake_count}")
+    print(f"Students allocated: {len(taken_students)}")
+    print(f"Students not allocated: {len(valid_students) - len(taken_students)}")
+    
+    # Company-wise distribution
+    print("\n📊 COMPANY-WISE DISTRIBUTION:")
+    company_distribution = {}
+    for alloc in allocations:
+        cid = alloc[1]
+        company_distribution[cid] = company_distribution.get(cid, 0) + 1
+    
+    for cid, count in sorted(company_distribution.items()):
+        print(f"   Company {cid}: {count} students allocated")
+    
+    # Position-wise distribution
+    print("\n📋 POSITION-WISE DISTRIBUTION:")
+    for pid, info in sorted(position_info.items()):
+        print(f"   Position {pid} (Company {info['company_id']}): {info['allocated']}/{info['max_positions']} filled")
+    
     print("=" * 80 + "\n")
     
     return allocations
+
 
 def analyze_resume_quality(text: str, domain: str = "General"):
     """

@@ -271,9 +271,27 @@ def student_dashboard():
                         "📋 Detailed Analysis:"
                     ]
                     
-                    for category, data in analysis.items():
-                        status = "✅" if data['score'] >= data['max'] * 0.7 else "⚠️" if data['score'] >= data['max'] * 0.4 else "❌"
-                        feedback_lines.append(f"{status} {category}: {data['score']}/{data['max']} - {data['msg']}")
+                    # Add score breakdown by category
+                    categories = {
+                        'resume_quality': ('Resume Quality', 25),
+                        'keyword_match': ('Domain Keywords', 30),
+                        'skill_match': ('Technical Skills', 25),
+                        'experience_signals': ('Experience & Impact', 20)
+                    }
+                    
+                    for key, (label, max_score) in categories.items():
+                        if key in analysis:
+                            score_value = analysis[key]
+                            percentage = (score_value / max_score * 100) if max_score > 0 else 0
+                            status = "✅" if percentage >= 70 else "⚠️" if percentage >= 40 else "❌"
+                            feedback_lines.append(f"{status} {label}: {score_value}/{max_score} ({percentage:.0f}%)")
+                    
+                    # Add detailed breakdown if available
+                    if 'breakdown' in analysis and analysis['breakdown']:
+                        feedback_lines.append("")
+                        feedback_lines.append("📝 Detailed Breakdown:")
+                        for item in analysis['breakdown']:
+                            feedback_lines.append(f"  {item}")
                     
                     if resume_score >= 50:
                         resume_path = new_resume_path
@@ -470,10 +488,20 @@ def admin_dashboard():
             WHERE u.role = 'company'
             ORDER BY u.name
         """).fetchall()
+        
+        # Get positions for each company
+        company_positions = conn.execute("""
+            SELECT company_id, COUNT(*) as position_count, SUM(positions) as total_openings
+            FROM company_positions
+            GROUP BY company_id
+        """).fetchall()
+        
+        # Convert to dict for easy lookup
+        positions_dict = {cp[0]: {'count': cp[1], 'openings': cp[2]} for cp in company_positions}
 
         allocations = conn.execute("""
             SELECT u.name, cp.company_name, pos.domain, a.score, a.rank,
-                   sp.resume_path, u.email, sp.profile_photo, sp.skills, sp.cgpa
+                   a.student_id, sp.resume_path, u.email, sp.profile_photo, sp.skills, sp.cgpa
             FROM allocations a
             JOIN users u ON a.student_id = u.user_id
             JOIN company_profile cp ON a.company_id = cp.user_id
@@ -485,6 +513,7 @@ def admin_dashboard():
     return render_template('admin_dashboard.html', 
                           students=students, 
                           companies=companies,
+                          company_positions=positions_dict,
                           allocations=allocations)
 
 
@@ -502,8 +531,9 @@ def admin_allocate():
     with get_connection() as conn:
         # Get all students with profiles
         students = conn.execute("""
-            SELECT u.user_id, sp.skills, sp.cgpa, sp.interest_domain, 
-                   sp.experience_years, sp.extracted_skills
+            SELECT u.user_id, u.name, u.email, sp.skills, sp.cgpa, 
+                   sp.interest_domain, sp.experience_years, sp.resume_path,
+                   sp.profile_photo, sp.extracted_skills
             FROM users u
             JOIN student_profile sp ON u.user_id = sp.user_id
             WHERE u.role = 'student' AND sp.cgpa IS NOT NULL
@@ -601,6 +631,58 @@ def admin_allocate():
 
     return redirect(url_for('admin_dashboard'))
 
+
+@app.route('/admin/deallocate/<int:student_id>', methods=['POST'])
+@role_required('admin')
+def deallocate_student(student_id):
+    """Remove allocation for a specific student"""
+    with get_connection() as conn:
+        # Check if student is allocated
+        allocation = conn.execute("""
+            SELECT a.allocation_id, u.name, cp.company_name
+            FROM allocations a
+            JOIN users u ON u.user_id = a.student_id
+            JOIN company_profile cp ON cp.user_id = a.company_id
+            WHERE a.student_id = ?
+        """, (student_id,)).fetchone()
+        
+        if not allocation:
+            flash(f'Student ID {student_id} is not currently allocated.', 'warning')
+            return redirect(url_for('admin_dashboard'))
+        
+        # Delete the allocation
+        try:
+            conn.execute("DELETE FROM allocations WHERE student_id = ?", (student_id,))
+            conn.commit()
+            
+            student_name = allocation[1]
+            company_name = allocation[2]
+            flash(f'Successfully deallocated {student_name} from {company_name}!', 'success')
+            print(f"[DEALLOCATION] Student {student_id} ({student_name}) removed from {company_name}")
+        except Exception as e:
+            flash(f'Error deallocating student: {str(e)}', 'error')
+            print(f"[DEALLOCATION ERROR] {str(e)}")
+    
+    return redirect(url_for('admin_dashboard'))
+
+
+@app.route('/admin/deallocate_all', methods=['POST'])
+@role_required('admin')
+def deallocate_all():
+    """Remove all allocations (reset allocation system)"""
+    with get_connection() as conn:
+        try:
+            count = conn.execute("SELECT COUNT(*) FROM allocations").fetchone()[0]
+            conn.execute("DELETE FROM allocations")
+            conn.commit()
+            
+            flash(f'Successfully cleared all {count} allocations! You can now run allocation again.', 'success')
+            print(f"[DEALLOCATION ALL] Removed {count} allocations")
+        except Exception as e:
+            flash(f'Error clearing allocations: {str(e)}', 'error')
+            print(f"[DEALLOCATION ALL ERROR] {str(e)}")
+    
+    return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/analytics')
 @role_required('admin')
@@ -714,3 +796,73 @@ if __name__ == '__main__':
     print("="*80 + "\n")
     
     app.run(debug=True, host='0.0.0.0', port=5000)
+
+@app.route('/company/position/delete/<int:position_id>', methods=['POST'])
+@role_required('company')
+def delete_position(position_id):
+    """Delete a position posted by the company"""
+    with get_connection() as conn:
+        # Verify the position belongs to this company
+        position = conn.execute("""
+            SELECT position_id FROM company_positions 
+            WHERE position_id = ? AND company_id = ?
+        """, (position_id, session['user_id'])).fetchone()
+        
+        if not position:
+            flash('Position not found or unauthorized access.', 'error')
+            return redirect(url_for('company_dashboard'))
+        
+        # Delete the position
+        try:
+            conn.execute("DELETE FROM company_positions WHERE position_id = ?", (position_id,))
+            conn.commit()
+            flash('Position deleted successfully!', 'success')
+        except Exception as e:
+            flash(f'Error deleting position: {str(e)}', 'error')
+    
+    return redirect(url_for('company_dashboard'))
+
+
+@app.route('/company/position/edit/<int:position_id>', methods=['GET', 'POST'])
+@role_required('company')
+def edit_position(position_id):
+    """Edit a position posted by the company"""
+    with get_connection() as conn:
+        # Verify the position belongs to this company
+        position = conn.execute("""
+            SELECT position_id, domain, required_skills, min_cgpa, positions, stipend
+            FROM company_positions 
+            WHERE position_id = ? AND company_id = ?
+        """, (position_id, session['user_id'])).fetchone()
+        
+        if not position:
+            flash('Position not found or unauthorized access.', 'error')
+            return redirect(url_for('company_dashboard'))
+        
+        if request.method == 'POST':
+            domain = request.form.get('domain', '').strip()
+            required_skills = request.form.get('required_skills', '').strip()
+            min_cgpa = float(request.form.get('min_cgpa', 0))
+            positions_count = int(request.form.get('positions', 0))
+            stipend = int(request.form.get('stipend', 0))
+            
+            try:
+                conn.execute("""
+                    UPDATE company_positions 
+                    SET domain = ?, required_skills = ?, min_cgpa = ?, positions = ?, stipend = ?
+                    WHERE position_id = ?
+                """, (domain, required_skills, min_cgpa, positions_count, stipend, position_id))
+                conn.commit()
+                flash('Position updated successfully!', 'success')
+                return redirect(url_for('company_dashboard'))
+            except Exception as e:
+                flash(f'Error updating position: {str(e)}', 'error')
+        
+        # Get company profile for the edit page
+        profile = conn.execute("""
+            SELECT company_name, location, contact_email, contact_no, profile_logo
+            FROM company_profile 
+            WHERE user_id = ?
+        """, (session['user_id'],)).fetchone()
+    
+    return render_template('edit_position.html', position=position, profile=profile)

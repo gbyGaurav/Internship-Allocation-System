@@ -69,7 +69,7 @@
                             <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">{{ s[3] if s[3] else '—' }}</td>
                             <td>
                                 {% if s[4] %}
-                                {{ s[4] }}
+                                <strong style="color: var(--success-color);">{{ s[4] }}</strong>
                                 {% else %}
                                 —
                                 {% endif %}
@@ -78,9 +78,9 @@
                             <td>{{ s[6] or 0 }} yrs</td>
                             <td>
                                 {% if s[7] %}
-                                <a href="/uploads/{{ s[7] }}" target="_blank" style="color: #667eea;">📄 View</a>
+                                <a href="/uploads/{{ s[7] }}" target="_blank" style="color: #667eea; font-weight: 600; text-decoration: none;">📄 View</a>
                                 {% else %}
-                                N/A
+                                <span style="color: #e74c3c; font-weight: 600;">❌ None</span>
                                 {% endif %}
                             </td>
                             <td>
@@ -102,73 +102,43 @@
             {% endif %}
         </div>
 
-        <!-- Allocation Controls & Results -->
+        <!-- Registered Companies -->
         <div class="card">
-            <h2>🎯 Run Allocation</h2>
-            
-            <form method="POST" action="/admin/allocate" id="allocation_form">
-                <!-- Email Checkbox - INSIDE form so it gets submitted -->
-                <div style="margin: 20px 0; padding: 15px; background: #f0f9ff; border-radius: 12px; border-left: 5px solid #667eea;">
-                    <label style="display: flex; align-items: center; gap: 12px; font-size: 16px; font-weight: 500; cursor: pointer;">
-                        <input type="checkbox" name="send_emails" id="send_emails" checked style="width: 20px; height: 20px; accent-color: #667eea;">
-                        <span>📧 Send professional allocation emails to selected students</span>
-                    </label>
-                    <p style="margin-top: 8px; font-size: 14px; color: #64748b; margin-left: 32px;">
-                        Students will receive detailed notifications with company info, rank, match score, and next steps.
-                    </p>
-                </div>
-
-                <button type="submit" class="btn" style="width: 100%; font-size: 20px; padding: 20px; background: linear-gradient(135deg, #27ae60 0%, #219653 100%);">
-                    🎯 Run Smart Allocation Now
-                </button>
-            </form>
-            
-            <p style="margin-top: 20px; color: #64748b; text-align: center;">
-                This will match students to positions using AI-powered resume analysis
-            </p>
-        </div>
-
-        <!-- Allocation Results -->
-        <div class="card">
-            <h2>📊 Allocation Results ({{ allocations|length }})</h2>
-            {% if allocations %}
+            <h2>🏢 Registered Companies ({{ companies|length }})</h2>
+            {% if companies %}
             <div style="overflow-x: auto;">
                 <table>
                     <thead>
                         <tr>
-                            <th>Rank</th>
-                            <th>Student</th>
-                            <th>Company</th>
-                            <th>Domain</th>
-                            <th>Match Score</th>
-                            <th>Skills</th>
-                            <th>CGPA</th>
-                            <th>Resume</th>
-                            <th>Photo</th>
+                            <th>ID</th>
+                            <th>User Name</th>
+                            <th>Email</th>
+                            <th>Company Name</th>
+                            <th>Location</th>
+                            <th>Positions</th>
+                            <th>Total Openings</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for a in allocations %}
+                        {% for c in companies %}
                         <tr>
-                            <td><span class="rank-badge">#{{ a[4] }}</span></td>
-                            <td><strong>{{ a[0] }}</strong></td>
-                            <td>{{ a[1] }}</td>
-                            <td><span class="status-badge status-success">{{ a[2] }}</span></td>
-                            <td><strong style="color: #667eea;">{{ "%.2f"|format(a[3]) }}/100</strong></td>
-                            <td style="max-width: 200px;">{{ a[8] or 'N/A' }}</td>
-                            <td><strong style="color: var(--success-color);">{{ a[9] or 'N/A' }}</strong></td>
+                            <td><strong>{{ c[0] }}</strong></td>
+                            <td><strong style="color: #667eea;">{{ c[1] }}</strong></td>
+                            <td>{{ c[2] }}</td>
+                            <td><strong>{{ c[3] or 'Not set' }}</strong></td>
+                            <td>{{ c[4] or 'N/A' }}</td>
                             <td>
-                                {% if a[5] %}
-                                <a href="/uploads/{{ a[5] }}" target="_blank" style="color: #667eea;">📄 View</a>
+                                {% if company_positions.get(c[0]) %}
+                                <span class="status-badge status-success">{{ company_positions[c[0]]['count'] }} positions</span>
                                 {% else %}
-                                N/A
+                                <span class="status-badge status-warning">No positions</span>
                                 {% endif %}
                             </td>
                             <td>
-                                {% if a[7] %}
-                                <img src="/uploads/{{ a[7] }}" style="width: 50px; height: 50px; border-radius: 50%; object-fit: cover;">
+                                {% if company_positions.get(c[0]) %}
+                                <strong style="color: var(--success-color);">{{ company_positions[c[0]]['openings'] }} openings</strong>
                                 {% else %}
-                                <div style="width: 50px; height: 50px; border-radius: 50%; background: var(--primary-gradient); display: flex; align-items: center; justify-content: center; color: white; font-size: 20px;">👤</div>
+                                —
                                 {% endif %}
                             </td>
                         </tr>
@@ -178,34 +148,153 @@
             </div>
             {% else %}
             <div class="empty-state">
-                <p>📊 No allocations yet</p>
-                <p style="font-size: 15px; margin-top: 12px;">Click "Run Smart Allocation Now" to start matching</p>
+                <p>🏢 No companies registered yet</p>
             </div>
             {% endif %}
         </div>
 
-        <!-- Flash Messages -->
-        {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-        <div class="flash-messages">
-            {% for category, message in messages %}
-            <div class="flash-message flash-{{ category }}">{{ message }}</div>
-            {% endfor %}
+        <!-- Smart Allocation -->
+        <div class="card">
+            <h2>🤖 AI-Powered Smart Allocation</h2>
+            <div style="padding: 24px; background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%); border-radius: 16px; margin-bottom: 24px; border-left: 5px solid var(--warning-color);">
+                <h3 style="margin: 0 0 12px 0; color: #856404;">ℹ️ How Smart Allocation Works:</h3>
+                <ul style="margin: 0; padding-left: 24px; color: #856404; line-height: 1.8;">
+                    <li><strong>Resume Analysis:</strong> AI analyzes each resume for quality, keywords, and skills (60% weight)</li>
+                    <li><strong>CGPA Matching:</strong> Students must meet minimum CGPA requirements (20% weight)</li>
+                    <li><strong>Experience:</strong> Years of experience contribute to matching score (10% weight)</li>
+                    <li><strong>Skill Alignment:</strong> Technical skills are matched against job requirements (10% weight)</li>
+                    <li><strong>Fair Distribution:</strong> Round-robin allocation ensures all companies get proportional candidates</li>
+                </ul>
+            </div>
+            
+            <form method="POST" action="/admin/allocate" onsubmit="return confirm('⚠️ This will clear previous allocations and run a new allocation.\n\n✅ Students with valid resumes will be matched\n✅ Email notifications can be sent\n\nContinue?');">
+                <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 24px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
+                        <input type="checkbox" name="send_emails" style="width: 20px; height: 20px; cursor: pointer;">
+                        <span style="font-size: 16px; font-weight: 600;">📧 Send allocation emails to students</span>
+                    </label>
+                </div>
+                
+                <button type="submit" class="btn" style="width: 100%; font-size: 18px; padding: 18px;">
+                    🚀 Run Smart Allocation Now
+                </button>
+            </form>
         </div>
-        <script>
-            // Auto-close flash messages after 5 seconds
-            setTimeout(() => {
-                const flashMessages = document.querySelector('.flash-messages');
-                if (flashMessages) {
-                    flashMessages.style.transition = 'opacity 0.5s ease';
-                    flashMessages.style.opacity = '0';
-                    setTimeout(() => flashMessages.remove(), 500);
-                }
-            }, 5000);
-        </script>
-        {% endif %}
-        {% endwith %}
 
+        <!-- Allocation Results WITH DEALLOCATION -->
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                <h2 style="margin: 0;">🎯 Current Allocations ({{ allocations|length }})</h2>
+                <div style="display: flex; gap: 12px;">
+                    {% if allocations %}
+                    <form method="POST" action="/admin/deallocate_all" 
+                          onsubmit="return confirm('⚠️ Are you sure you want to REMOVE ALL allocations?\n\nThis will:\n- Remove all {{ allocations|length }} current allocations\n- Allow you to run allocation again\n- This action CANNOT be undone!\n\nProceed?');"
+                          style="display: inline;">
+                        <button type="submit" class="btn" 
+                                style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);">
+                            🗑️ Clear All Allocations
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+            
+            {% if allocations %}
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Student</th>
+                            <th>Email</th>
+                            <th>Company</th>
+                            <th>Domain</th>
+                            <th>Match Score</th>
+                            <th>Skills</th>
+                            <th>CGPA</th>
+                            <th>Resume</th>
+                            <th>Photo</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for a in allocations %}
+                        <tr>
+                            <td><span class="rank-badge">#{{ a[4] }}</span></td>
+                            <td><strong>{{ a[0] }}</strong></td>
+                            <td>{{ a[7] }}</td>
+                            <td><strong style="color: var(--success-color);">{{ a[1] }}</strong></td>
+                            <td><span class="status-badge status-success">{{ a[2] }}</span></td>
+                            <td><strong style="color: #667eea;">{{ "%.2f"|format(a[3]) }}/100</strong></td>
+                            <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">{{ a[9] or 'N/A' }}</td>
+                            <td><strong style="color: var(--success-color);">{{ a[10] or 'N/A' }}</strong></td>
+                            <td>
+                                {% if a[6] %}
+                                <a href="/uploads/{{ a[6] }}" target="_blank" style="color: #667eea; font-weight: 600; text-decoration: none;">📄 View</a>
+                                {% else %}
+                                <span style="color: #e74c3c; font-weight: 600;">❌ None</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if a[8] %}
+                                <img src="/uploads/{{ a[8] }}" alt="Photo" style="width: 50px; height: 50px; border-radius: 50%; object-fit: cover; box-shadow: var(--shadow-sm);">
+                                {% else %}
+                                <div style="width: 50px; height: 50px; border-radius: 50%; background: var(--primary-gradient); display: flex; align-items: center; justify-content: center; color: white; font-size: 20px;">👤</div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <form method="POST" action="/admin/deallocate/{{ a[5] }}" 
+                                      style="margin: 0; display: inline;"
+                                      onsubmit="return confirm('⚠️ Remove allocation?\n\nStudent: {{ a[0] }}\nCompany: {{ a[1] }}\n\nThis will free up the student for a new allocation.\n\nProceed?');">
+                                    <button type="submit" 
+                                            style="padding: 6px 12px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s ease;">
+                                        🗑️ Remove
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Distribution Summary -->
+            <div style="margin-top: 32px; padding: 24px; background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%); border-radius: 16px; border-left: 5px solid var(--success-color);">
+                <h3 style="margin: 0 0 16px 0; color: var(--success-color);">📊 Distribution Summary:</h3>
+                {% set company_stats = {} %}
+                {% for alloc in allocations %}
+                    {% if alloc[1] not in company_stats %}
+                        {% set _ = company_stats.update({alloc[1]: 0}) %}
+                    {% endif %}
+                    {% set _ = company_stats.update({alloc[1]: company_stats[alloc[1]] + 1}) %}
+                {% endfor %}
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+                    {% for company, count in company_stats.items() %}
+                    <div style="padding: 12px; background: white; border-radius: 8px; box-shadow: var(--shadow-sm);">
+                        <p style="margin: 0; font-weight: 600; color: var(--dark-text);">🏢 {{ company }}</p>
+                        <p style="margin: 4px 0 0 0; font-size: 24px; font-weight: 800; color: var(--success-color);">{{ count }} students</p>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div style="margin-top: 24px; padding: 20px; background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%); border-radius: 16px; border-left: 5px solid var(--success-color);">
+                <p style="font-weight: 600; color: #155724; margin: 0 0 8px 0;">
+                    🎉 {{ allocations|length }} student(s) successfully allocated!
+                </p>
+                <p style="color: #155724; margin: 0; font-size: 14px;">
+                    💡 <strong>Tip:</strong> You can remove individual students or clear all allocations to run the allocation process again.
+                </p>
+            </div>
+            {% else %}
+            <div class="empty-state">
+                <p>🎯</p>
+                <p>No allocations yet.</p>
+                <p style="font-size: 15px; margin-top: 12px;">Click "Run Smart Allocation Now" to match students with companies.</p>
+            </div>
+            {% endif %}
+        </div>
     </div>
 </body>
 </html>

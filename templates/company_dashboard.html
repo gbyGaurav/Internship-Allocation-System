@@ -153,16 +153,33 @@
                                 <th>Min CGPA</th>
                                 <th>Openings</th>
                                 <th>Stipend</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for pos in positions %}
                             <tr>
                                 <td><strong style="color: #667eea;">{{ pos[2] }}</strong></td>
-                                <td>{{ pos[3] }}</td>
+                                <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis;">{{ pos[3] }}</td>
                                 <td><span class="status-badge status-success">{{ pos[4] }}+</span></td>
                                 <td><span class="status-badge status-warning">{{ pos[5] }} positions</span></td>
                                 <td><strong style="color: var(--success-color);">₹{{ pos[6] }}/mo</strong></td>
+                                <td>
+                                    <div style="display: flex; gap: 8px;">
+                                        <a href="/company/position/edit/{{ pos[0] }}" 
+                                           style="padding: 6px 12px; background: #3498db; color: white; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: 600;">
+                                            ✏️ Edit
+                                        </a>
+                                        <form method="POST" action="/company/position/delete/{{ pos[0] }}" 
+                                              style="margin: 0; display: inline;"
+                                              onsubmit="return confirm('Are you sure you want to delete this position? This action cannot be undone.');">
+                                            <button type="submit" 
+                                                    style="padding: 6px 12px; background: #e74c3c; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;">
+                                                🗑️ Delete
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
                             </tr>
                             {% endfor %}
                         </tbody>

@@ -272,18 +272,39 @@ Relevant Coursework: Data Structures, Algorithms, Machine Learning">{{ profile[5
 
                 {% if detailed_feedback %}
                     <div class="feedback-breakdown">
-                        <h4>📊 Detailed Breakdown:</h4>
+                        <h4>📊 Score Breakdown by Category:</h4>
                         <ul>
-                            {% for category, data in detailed_feedback.items() %}
-                                <li>
-                                    <strong>{{ category }}:</strong> 
-                                    <span style="color: {% if data.score >= data.max * 0.7 %}var(--success-color){% elif data.score >= data.max * 0.4 %}var(--warning-color){% else %}var(--danger-color){% endif %}; font-weight: 700;">
-                                        {{ data.score }}/{{ data.max }}
-                                    </span>
-                                    – {{ data.msg }}
-                                </li>
+                            {% set categories = {
+                                'resume_quality': ('Resume Quality & Structure', 25),
+                                'keyword_match': ('Domain-Specific Keywords', 30),
+                                'skill_match': ('Technical Skills Match', 25),
+                                'experience_signals': ('Experience & Impact', 20)
+                            } %}
+                            
+                            {% for key, (label, max_score) in categories.items() %}
+                                {% if key in detailed_feedback and key != 'breakdown' %}
+                                    {% set score_value = detailed_feedback[key] %}
+                                    {% set percentage = (score_value / max_score * 100) if max_score > 0 else 0 %}
+                                    <li>
+                                        <strong>{{ label }}:</strong> 
+                                        <span style="color: {% if percentage >= 70 %}var(--success-color){% elif percentage >= 40 %}var(--warning-color){% else %}var(--danger-color){% endif %}; font-weight: 700;">
+                                            {{ score_value }}/{{ max_score }}
+                                        </span>
+                                        ({{ "%.0f"|format(percentage) }}%)
+                                        {% if percentage >= 70 %}✅{% elif percentage >= 40 %}⚠️{% else %}❌{% endif %}
+                                    </li>
+                                {% endif %}
                             {% endfor %}
                         </ul>
+                        
+                        {% if detailed_feedback.breakdown %}
+                            <h4 style="margin-top: 20px;">📝 Detailed Analysis:</h4>
+                            <ul style="font-size: 14px; color: #64748b;">
+                                {% for item in detailed_feedback.breakdown %}
+                                    <li>{{ item }}</li>
+                                {% endfor %}
+                            </ul>
+                        {% endif %}
                     </div>
                 {% endif %}
 
